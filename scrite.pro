@@ -21,6 +21,7 @@ HEADERS += \
     characterreportgenerator.h \
     completer.h \
     delayedpropertybinder.h \
+    documentfilesystem.h \
     errorreport.h \
     eventfilter.h \
     finaldraftexporter.h \
@@ -93,6 +94,7 @@ SOURCES += \
     characterreportgenerator.cpp \
     completer.cpp \
     delayedpropertybinder.cpp \
+    documentfilesystem.cpp \
     errorreport.cpp \
     eventfilter.cpp \
     finaldraftexporter.cpp \
