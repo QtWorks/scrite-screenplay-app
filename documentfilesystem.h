@@ -40,6 +40,8 @@ public:
     QFile *open(const QString &path, QFile::OpenMode mode=QFile::ReadOnly);
     QByteArray read(const QString &path);
     bool write(const QString &path, const QByteArray &bytes);
+    void remove(const QString &path);
+    QString absolutePath(const QString &path, bool mkpath=false) const;
 
     bool exists(const QString &path) const;
     QFileInfo fileInfo(const QString &path) const;

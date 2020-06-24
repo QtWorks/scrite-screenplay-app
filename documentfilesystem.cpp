@@ -129,7 +129,7 @@ QByteArray DocumentFileSystem::header() const
 
 QFile *DocumentFileSystem::open(const QString &path, QFile::OpenMode mode)
 {
-    const QString completePath = d->folder->filePath(path);
+    const QString completePath = this->absolutePath(path, true);
     if( !QFile::exists(completePath) && mode == QIODevice::ReadOnly )
         return nullptr;
 
@@ -147,7 +147,7 @@ QByteArray DocumentFileSystem::read(const QString &path)
 {
     QByteArray ret;
 
-    const QString completePath = d->folder->filePath(path);
+    const QString completePath = this->absolutePath(path);
     if( !QFile::exists(completePath) )
         return ret;
 
@@ -163,15 +163,7 @@ QByteArray DocumentFileSystem::read(const QString &path)
 
 bool DocumentFileSystem::write(const QString &path, const QByteArray &bytes)
 {
-    const QString completePath = d->folder->filePath(path);
-    const QFileInfo fi(completePath);
-
-    if( !fi.exists() )
-    {
-        if( !QDir().mkpath(fi.absolutePath()) )
-            return false;
-    }
-
+    const QString completePath = this->absolutePath(path, true);
     DocumentFile file(completePath, this);
     if( !file.open(QFile::WriteOnly) )
         return false;
@@ -180,15 +172,33 @@ bool DocumentFileSystem::write(const QString &path, const QByteArray &bytes)
     return true;
 }
 
+void DocumentFileSystem::remove(const QString &path)
+{
+    const QString completePath = this->absolutePath(path);
+    QFile::remove(completePath);
+}
+
+QString DocumentFileSystem::absolutePath(const QString &path, bool mkpath) const
+{
+    const QString ret = d->folder->filePath(path);
+    const QFileInfo fi(ret);
+    if(!fi.exists() && mkpath)
+    {
+        if( !QDir().mkpath(fi.absolutePath()) )
+            return QString();
+    }
+    return ret;
+}
+
 bool DocumentFileSystem::exists(const QString &path) const
 {
-    const QString completePath = d->folder->filePath(path);
+    const QString completePath = this->absolutePath(path);
     return QFile::exists(completePath);
 }
 
 QFileInfo DocumentFileSystem::fileInfo(const QString &path) const
 {
-    const QString completePath = d->folder->filePath(path);
+    const QString completePath = this->absolutePath(path);
     return QFileInfo(completePath);
 }
 
