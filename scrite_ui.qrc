@@ -41,5 +41,7 @@
         <file>qml/SceneNumberBubble.qml</file>
         <file>qml/ZoomSlider.qml</file>
         <file>qml/SceneTypeImage.qml</file>
+        <file>qml/NotesListView.qml</file>
+        <file>qml/SidePanel.qml</file>
     </qresource>
 </RCC>

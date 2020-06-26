@@ -1,4 +1,4 @@
-QT += gui qml quick widgets xml concurrent network quickcontrols2
+QT += gui qml quick widgets xml concurrent network quickcontrols2 webenginewidgets
 DESTDIR = $$PWD/../Release/
 
 DEFINES += PHTRANSLATE_STATICLIB
@@ -40,6 +40,7 @@ HEADERS += \
     locationreportgenerator.h \
     materialcolors.h \
     modifiable.h \
+    networkaccess.h \
     note.h \
     notification.h \
     notificationmanager.h \
@@ -112,6 +113,7 @@ SOURCES += \
     locationreportgenerator.cpp \
     main.cpp \
     materialcolors.cpp \
+    networkaccess.cpp \
     note.cpp \
     notification.cpp \
     notificationmanager.cpp \
@@ -161,7 +163,11 @@ RESOURCES += \
     scrite_telugu_font.qrc \
     scrite_icons.qrc \
     scrite_images.qrc \
-    scrite_ui.qrc
+    scrite_ui.qrc \
+    scrite_js.qrc
+
+# https://doc.qt.io/qt-5/qtwebengine-deploying.html#javascript-files-in-qt-resource-files
+QTQUICK_COMPILER_SKIPPED_RESOURCES += scrite_js.qrc
 
 macx {
     ICON = appicon.icns

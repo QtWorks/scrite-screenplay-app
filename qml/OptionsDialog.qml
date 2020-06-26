@@ -15,7 +15,8 @@ import QtQuick 2.13
 import QtQuick.Dialogs 1.3
 import Qt.labs.settings 1.0
 import QtQuick.Controls 2.13
-import QtQuick.Controls.Material 2.12
+import QtGraphicalEffects 1.12
+
 import Scrite 1.0
 
 Item {
@@ -178,9 +179,24 @@ Item {
                     border.color: "black"
                     anchors.horizontalCenter: parent.horizontalCenter
 
+                    Loader {
+                        anchors.fill: parent
+                        active: coverPagePhoto.paintedWidth < parent.width || coverPagePhoto.paintedHeight < parent.height
+                        opacity: 0.1
+                        sourceComponent: Item {
+                            Image {
+                                id: coverPageImage
+                                anchors.fill: parent
+                                fillMode: Image.PreserveAspectCrop
+                                source: "file://" + scriteDocument.screenplay.coverPagePhoto
+                            }
+                        }
+                    }
+
                     Image {
                         id: coverPagePhoto
                         anchors.fill: parent
+                        anchors.margins: 1
                         smooth: true; mipmap: true
                         fillMode: Image.PreserveAspectFit
                         source: "file://" + scriteDocument.screenplay.coverPagePhoto

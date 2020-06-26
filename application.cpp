@@ -32,6 +32,7 @@
 #include <QMessageBox>
 #include <QJsonObject>
 #include <QColorDialog>
+#include <QNetworkReply>
 #include <QFontDatabase>
 #include <QStandardPaths>
 

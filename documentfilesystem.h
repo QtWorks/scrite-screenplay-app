@@ -38,10 +38,15 @@ public:
     QByteArray header() const;
 
     QFile *open(const QString &path, QFile::OpenMode mode=QFile::ReadOnly);
+
     QByteArray read(const QString &path);
     bool write(const QString &path, const QByteArray &bytes);
+
+    QString add(const QString &fileName, const QString &ns=QString());
     void remove(const QString &path);
+
     QString absolutePath(const QString &path, bool mkpath=false) const;
+    bool contains(const QString &path) const;
 
     bool exists(const QString &path) const;
     QFileInfo fileInfo(const QString &path) const;

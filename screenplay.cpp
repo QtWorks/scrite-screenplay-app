@@ -366,6 +366,10 @@ void Screenplay::setCoverPagePhoto(const QString &val)
     }
     else
     {
+        const QSize imageSize = image.size().scaled(1920, 1080, Qt::KeepAspectRatio);
+        if(image.width() > imageSize.width() || image.height() > imageSize.height())
+            image = image.scaled(imageSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
         const QString photoPath = m_scriteDocument->fileSystem()->absolutePath(coverPagePhotoPath, true);
         if(image.save(photoPath, "JPG"))
             m_coverPagePhoto = photoPath;

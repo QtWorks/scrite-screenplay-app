@@ -13,8 +13,10 @@
 
 #include "documentfilesystem.h"
 
-#include <QDataStream>
 #include <QDir>
+#include <QtDebug>
+#include <QDateTime>
+#include <QDataStream>
 #include <QTemporaryDir>
 
 struct DocumentFileSystemData
@@ -39,11 +41,35 @@ void DocumentFileSystemData::pack(QDataStream &ds, const QString &path)
     {
         const QString filePath = fi.absoluteFilePath();
 
-        QFile file(filePath);
-        const QByteArray fileContents = file.open(QFile::ReadOnly) ? file.readAll() : QByteArray();
-
         QDir fsDir(this->folder->path());
-        ds << fsDir.relativeFilePath(filePath) << fileContents;
+        ds << fsDir.relativeFilePath(filePath);
+
+        QFile file(filePath);
+        if(file.open(QFile::ReadOnly))
+        {
+            const qint64 fileSize = file.size();
+            const qint64 fileSizeFieldPosition = ds.device()->pos();
+            ds << fileSize;
+
+            qint64 bytesWritten = 0;
+            const int bufferSize = 65535;
+            char buffer[bufferSize];
+            while(!file.atEnd() && bytesWritten < fileSize)
+            {
+                const int bytesRead = int(file.read(buffer, qint64(bufferSize)));
+                bytesWritten += qint64(ds.writeRawData(buffer, bytesRead));
+            }
+
+            if(bytesWritten != fileSize)
+            {
+                const qint64 devicePosition = ds.device()->pos();
+                ds.device()->seek(fileSizeFieldPosition);
+                ds << bytesWritten;
+                ds.device()->seek(devicePosition);
+            }
+        }
+        else
+            ds << qint64(0);
     }
 }
 
@@ -78,11 +104,16 @@ void DocumentFileSystem::reset()
     }
 
     d->folder.reset(new QTemporaryDir);
+
+    qDebug() << "PA: " << d->folder->path();
 }
 
 bool DocumentFileSystem::load(const QString &fileName)
 {
     this->reset();
+
+    if(fileName.isEmpty())
+        return false;
 
     QFile file(fileName);
     if(!file.open(QFile::ReadOnly))
@@ -99,6 +130,9 @@ bool DocumentFileSystem::load(const QString &fileName)
 
 bool DocumentFileSystem::save(const QString &fileName)
 {
+    if(fileName.isEmpty())
+        return false;
+
     QFile file(fileName);
     if( !file.open(QFile::WriteOnly) )
         return false;
@@ -129,6 +163,9 @@ QByteArray DocumentFileSystem::header() const
 
 QFile *DocumentFileSystem::open(const QString &path, QFile::OpenMode mode)
 {
+    if(path.isEmpty())
+        return nullptr;
+
     const QString completePath = this->absolutePath(path, true);
     if( !QFile::exists(completePath) && mode == QIODevice::ReadOnly )
         return nullptr;
@@ -147,6 +184,9 @@ QByteArray DocumentFileSystem::read(const QString &path)
 {
     QByteArray ret;
 
+    if(path.isEmpty())
+        return ret;
+
     const QString completePath = this->absolutePath(path);
     if( !QFile::exists(completePath) )
         return ret;
@@ -163,6 +203,9 @@ QByteArray DocumentFileSystem::read(const QString &path)
 
 bool DocumentFileSystem::write(const QString &path, const QByteArray &bytes)
 {
+    if(path.isEmpty() || bytes.isEmpty())
+        return false;
+
     const QString completePath = this->absolutePath(path, true);
     DocumentFile file(completePath, this);
     if( !file.open(QFile::WriteOnly) )
@@ -172,14 +215,44 @@ bool DocumentFileSystem::write(const QString &path, const QByteArray &bytes)
     return true;
 }
 
+QString DocumentFileSystem::add(const QString &fileName, const QString &ns)
+{
+    if(fileName.isEmpty())
+        return QString();
+
+    if(this->contains(fileName))
+        return this->absolutePath(fileName);
+
+    const QFileInfo fi(fileName);
+    if(!fi.exists() || !fi.isFile())
+        return QString();
+
+    const QString suffix = fi.suffix().toLower();
+    const QString path = ns + "/" + QString::number(QDateTime::currentSecsSinceEpoch()) + "." + suffix;
+    const QString absPath = this->absolutePath(path, true);
+    if( QFile::copy(fileName, path) )
+    {
+        QFile::remove(absPath);
+        return path;
+    }
+
+    return QString();
+}
+
 void DocumentFileSystem::remove(const QString &path)
 {
+    if(path.isEmpty())
+        return;
+
     const QString completePath = this->absolutePath(path);
     QFile::remove(completePath);
 }
 
 QString DocumentFileSystem::absolutePath(const QString &path, bool mkpath) const
 {
+    if(path.isEmpty())
+        return QString();
+
     const QString ret = d->folder->filePath(path);
     const QFileInfo fi(ret);
     if(!fi.exists() && mkpath)
@@ -190,14 +263,32 @@ QString DocumentFileSystem::absolutePath(const QString &path, bool mkpath) const
     return ret;
 }
 
+bool DocumentFileSystem::contains(const QString &path) const
+{
+    if(path.isEmpty())
+        return false;
+
+    QFileInfo fi(path);
+    if(fi.isRelative())
+        return this->exists(path);
+
+    return fi.absoluteFilePath().startsWith( d->folder->path() );
+}
+
 bool DocumentFileSystem::exists(const QString &path) const
 {
+    if(path.isEmpty())
+        return false;
+
     const QString completePath = this->absolutePath(path);
     return QFile::exists(completePath);
 }
 
 QFileInfo DocumentFileSystem::fileInfo(const QString &path) const
 {
+    if(path.isEmpty())
+        return QFileInfo();
+
     const QString completePath = this->absolutePath(path);
     return QFileInfo(completePath);
 }
@@ -224,8 +315,7 @@ bool DocumentFileSystem::unpack(QDataStream &ds)
     while(!ds.atEnd())
     {
         QString relativeFilePath;
-        QByteArray fileContents;
-        ds >> relativeFilePath >> fileContents;
+        ds >> relativeFilePath;
 
         const QString absoluteFilePath = folderPath.absoluteFilePath(relativeFilePath);
         const QFileInfo fi(absoluteFilePath);
@@ -237,8 +327,21 @@ bool DocumentFileSystem::unpack(QDataStream &ds)
         if( !file.open(QFile::WriteOnly) )
             return false;
 
-        file.write(fileContents);
-        file.close();
+        qint64 fileSize = 0;
+        ds >> fileSize;
+        if(fileSize == 0)
+            continue;
+
+        qint64 bytesRead = 0;
+        const int bufferSize = 65535;
+        char buffer[bufferSize];
+
+        while(bytesRead < fileSize)
+        {
+            const int rawDataLen = ds.readRawData(buffer, qMin(int(fileSize-bytesRead),bufferSize));
+            file.write(buffer, rawDataLen);
+            bytesRead += qint64(rawDataLen);
+        }
     }
 
     return true;

@@ -19,13 +19,13 @@ import QtQuick.Controls.Material 2.12
 Item {
     id: tabBarTab
     width: implicitTabSize
-    height: structureEditorTabs.height
+    height: 25
 
     readonly property real tabTextWidth: tabText.width
     readonly property real implicitTabSize: tabTextWidth*1.1 + 2*tabShapeOffset
+    property alias font: tabText.font
     property alias text: tabText.text
     property alias textColor: tabText.color
-    property alias font: tabText.font
     property alias tabFillColor: tabShapeItem.fillColor
     property alias tabBorderColor: tabShapeItem.outlineColor
     property alias tabBorderWidth: tabShapeItem.outlineWidth

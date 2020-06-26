@@ -1615,9 +1615,23 @@ Rectangle {
                 Behavior on height { NumberAnimation { duration: 250 } }
 
                 Image {
-                    anchors.fill: parent
+                    anchors.centerIn: parent
+                    anchors.verticalCenterOffset: label.width/2 + 10
+                    anchors.horizontalCenterOffset: sceneListPanelLoader.expanded ? 0 : parent.radius/2
+                    width: parent.width
+                    height: width
                     fillMode: Image.PreserveAspectFit
                     source: sceneListPanelLoader.expanded ? "../icons/navigation/arrow_left.png" : "../icons/navigation/arrow_right.png"
+                }
+
+                Text {
+                    id: label
+                    font.pixelSize: parent.width * 0.45
+                    text: "SCENES"
+                    anchors.centerIn: parent
+                    anchors.horizontalCenterOffset: sceneListPanelLoader.expanded ? 0 : parent.radius/2
+                    rotation: -90
+                    transformOrigin: Item.Center
                 }
 
                 MouseArea {
