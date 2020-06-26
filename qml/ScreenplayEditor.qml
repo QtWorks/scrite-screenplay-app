@@ -167,8 +167,7 @@ Rectangle {
     Item {
         id: screenplayEditorWorkspace
         anchors.top: toolbar.visible ? toolbar.bottom : parent.top
-        anchors.left: parent.left
-        anchors.leftMargin: sceneListPanelLoader.active ? sceneListPanelLoader.width : 0
+        anchors.left: sidePanels.right
         anchors.right: parent.right
         anchors.bottom: statusBar.top
         clip: true
@@ -1453,56 +1452,25 @@ Rectangle {
         }
     }
 
-    Loader {
-        id: sceneListPanelLoader
+    Item {
+        id: sidePanels
         anchors.top: screenplayEditorWorkspace.top
         anchors.left: parent.left
-        anchors.bottom: parent.bottom
+        anchors.bottom: statusBar.top
         anchors.topMargin: 5
-        anchors.bottomMargin: statusBar.height
-        active: screenplayAdapter.isSourceScreenplay && globalScreenplayEditorToolbar.editInFullscreen && !scriteDocument.loading
-        property bool expanded: false
-        readonly property int expandCollapseButtonWidth: 25
-        readonly property int sceneListAreaWidth: 440
-        clip: !sceneListPanelLoader.expanded
-        width: active ? (expanded ? sceneListAreaWidth : expandCollapseButtonWidth) : 0
-        Behavior on width { NumberAnimation { duration: 250 } }
-        visible: !screenplayPreview.visible
+        anchors.bottomMargin: 5
+        width: Math.max(sceneListSidePanel.width, notesSidePanel.width)
 
-        FocusTracker.window: qmlWindow
-        FocusTracker.onHasFocusChanged: {
-            if(!FocusTracker.hasFocus)
-                sceneListPanelLoader.expanded = false
-        }
+        SidePanel {
+            id: sceneListSidePanel
+            height: parent.height
+            buttonY: 20
+            buttonText: "SCENES"
+            z: expanded ? 1 : 0
 
-        sourceComponent: Item {
-            id: sceneListPanel
-            width: expandCollapseButton.width + (expanded ? sceneListArea.width : 0)
-
-            BorderImage {
-                source: "../icons/content/shadow.png"
-                anchors.fill: sceneListArea
-                horizontalTileMode: BorderImage.Stretch
-                verticalTileMode: BorderImage.Stretch
-                anchors { leftMargin: -11; topMargin: -11; rightMargin: -10; bottomMargin: -10 }
-                border { left: 21; top: 21; right: 21; bottom: 21 }
-                opacity: 0.25
-                visible: sceneListArea.visible
-            }
-
-            Rectangle {
-                id: sceneListArea
-                color: "white"
-                border.width: 1
-                border.color: primaryColors.borderColor
-                height: parent.height
-                width: sceneListAreaWidth
-                opacity: sceneListPanelLoader.expanded ? 1 : 0
-                Behavior on opacity {  NumberAnimation { duration: 250 } }
-                visible: opacity > 0
-
+            content: Item {
                 Text {
-                    width: sceneListView.width * 0.9
+                    width: parent.width * 0.9
                     wrapMode: Text.WordWrap
                     horizontalAlignment: Text.AlignHCenter
                     font.pixelSize: 16
@@ -1516,10 +1484,6 @@ Rectangle {
                 ListView {
                     id: sceneListView
                     anchors.fill: parent
-                    anchors.topMargin: 5
-                    anchors.leftMargin: expandCollapseButton.width + 5
-                    anchors.rightMargin: 5
-                    anchors.bottomMargin: 5
                     clip: true
                     model: screenplayAdapter
                     currentIndex: screenplayAdapter.currentIndex
@@ -1585,7 +1549,7 @@ Rectangle {
                             onClicked: navigateToScene()
                             onDoubleClicked: {
                                 navigateToScene()
-                                sceneListPanelLoader.expanded = false
+                                sceneListSidePanel.expanded = false
                             }
 
                             function navigateToScene() {
@@ -1599,55 +1563,17 @@ Rectangle {
                     }
                 }
             }
+        }
 
-            Rectangle {
-                id: expandCollapseButton
-                width: expandCollapseButtonWidth
-                height: sceneListPanelLoader.expanded ? parent.height-8 : expandCollapseButtonWidth*5
-                color: primaryColors.button.background
-                radius: (1.0-sceneListArea.opacity) * 6
-                border.width: 1
-                border.color: sceneListPanelLoader.expanded ? primaryColors.windowColor : primaryColors.borderColor
-                anchors.left: parent.left
-                anchors.top: parent.top
-                anchors.topMargin: 4
-                anchors.leftMargin: sceneListPanelLoader.expanded ? 4 : -radius
-                Behavior on height { NumberAnimation { duration: 250 } }
+        SidePanel {
+            id: notesSidePanel
+            height: parent.height
+            buttonY: sceneListSidePanel.buttonY + sceneListSidePanel.buttonSize + 10
+            buttonText: "NOTES"
+            z: expanded ? 1 : 0
 
-                Image {
-                    anchors.centerIn: parent
-                    anchors.verticalCenterOffset: label.width/2 + 10
-                    anchors.horizontalCenterOffset: sceneListPanelLoader.expanded ? 0 : parent.radius/2
-                    width: parent.width
-                    height: width
-                    fillMode: Image.PreserveAspectFit
-                    source: sceneListPanelLoader.expanded ? "../icons/navigation/arrow_left.png" : "../icons/navigation/arrow_right.png"
-                }
+            content: Item {
 
-                Text {
-                    id: label
-                    font.pixelSize: parent.width * 0.45
-                    text: "SCENES"
-                    anchors.centerIn: parent
-                    anchors.horizontalCenterOffset: sceneListPanelLoader.expanded ? 0 : parent.radius/2
-                    rotation: -90
-                    transformOrigin: Item.Center
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: sceneListPanelLoader.expanded = !sceneListPanelLoader.expanded
-                }
-
-                Rectangle {
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    anchors.left: parent.left
-                    anchors.leftMargin: parent.radius
-                    width: 1
-                    color: primaryColors.borderColor
-                    visible: !sceneListPanelLoader.expanded
-                }
             }
         }
     }
