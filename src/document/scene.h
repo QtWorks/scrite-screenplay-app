@@ -32,6 +32,7 @@
 #include "qobjectproperty.h"
 #include "qobjectserializer.h"
 #include "spellcheckservice.h"
+#include "objectlistpropertymodel.h"
 
 class Scene;
 class SceneHeading;
@@ -257,6 +258,9 @@ public:
     Q_SIGNAL void sceneAboutToReset();
     Q_SIGNAL void sceneReset(int elementIndex);
 
+    Q_PROPERTY(QAbstractListModel* notesModel READ notesModel CONSTANT)
+    QAbstractListModel *notesModel() const { return &((const_cast<Scene*>(this))->m_notes); }
+
     Q_PROPERTY(QQmlListProperty<Note> notes READ notes)
     QQmlListProperty<Note> notes();
     Q_INVOKABLE void addNote(Note *ptr);
@@ -282,6 +286,11 @@ public:
     QByteArray toByteArray() const;
     bool resetFromByteArray(const QByteArray &bytes);
     static Scene *fromByteArray(const QByteArray &bytes);
+
+    Q_PROPERTY(QJsonObject characterRelationshipGraph READ characterRelationshipGraph WRITE setCharacterRelationshipGraph NOTIFY characterRelationshipGraphChanged)
+    void setCharacterRelationshipGraph(const QJsonObject &val);
+    QJsonObject characterRelationshipGraph() const { return m_characterRelationshipGraph; }
+    Q_SIGNAL void characterRelationshipGraphChanged();
 
     // QObjectSerializer::Interface interface
     void serializeToJson(QJsonObject &json) const;
@@ -311,6 +320,7 @@ private:
     bool m_undoRedoEnabled = false;
     bool m_inSetElementsList = false;
     PushSceneUndoCommand *m_pushUndoCommand = nullptr;
+    QJsonObject m_characterRelationshipGraph;
     CharacterElementMap m_characterElementMap;
 
     static void staticAppendElement(QQmlListProperty<SceneElement> *list, SceneElement *ptr);
@@ -323,7 +333,7 @@ private:
     static void staticClearNotes(QQmlListProperty<Note> *list);
     static Note* staticNoteAt(QQmlListProperty<Note> *list, int index);
     static int staticNoteCount(QQmlListProperty<Note> *list);
-    QList<Note *> m_notes;
+    ObjectListPropertyModel<Note *> m_notes;
 };
 
 class ScreenplayFormat;

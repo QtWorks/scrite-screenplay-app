@@ -120,6 +120,7 @@ public:
 
     Q_INVOKABLE QString typeName(QObject *object) const;
     Q_INVOKABLE bool verifyType(QObject *object, const QString &name) const;
+    Q_INVOKABLE bool isTextInputItem(QQuickItem *item) const;
 
     Q_PROPERTY(QVersionNumber versionNumber READ versionNumber CONSTANT)
     QVersionNumber versionNumber() const { return m_versionNumber; }
@@ -210,6 +211,11 @@ public:
 
     Q_INVOKABLE QPointF globalMousePosition() const;
 
+    Q_INVOKABLE QString camelCased(const QString &val) const;
+
+    Q_INVOKABLE void saveWindowGeometry(QWindow *window, const QString &group);
+    Q_INVOKABLE bool restoreWindowGeometry(QWindow *window, const QString &group);
+
     // Must be called from main.cpp
     void initializeStandardColors(QQmlEngine *);
 
@@ -226,6 +232,9 @@ public:
     QString fileToOpen() const { return m_fileToOpen; }
     void setHandleFileOpenEvents(bool val=true) { m_handleFileOpenEvents = val; }
 #endif
+
+    QString painterPathToString(const QPainterPath &val) const;
+    QPainterPath stringToPainterPath(const QString &val) const;
 
     Q_SIGNAL void openFileRequest(const QString &filePath);
 

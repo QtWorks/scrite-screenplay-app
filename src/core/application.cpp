@@ -40,6 +40,7 @@
 #include <QFontDatabase>
 #include <QStandardPaths>
 #include <QOperatingSystemVersion>
+#include <QScreen>
 
 #define ENABLE_SCRIPT_HOTKEY
 
@@ -214,6 +215,11 @@ QString Application::typeName(QObject *object) const
 bool Application::verifyType(QObject *object, const QString &name) const
 {
     return object && object->inherits(qPrintable(name));
+}
+
+bool Application::isTextInputItem(QQuickItem *item) const
+{
+    return item && item->flags() & QQuickItem::ItemAcceptsInputMethod;
 }
 
 UndoStack *Application::findUndoStack(const QString &objectName) const
@@ -747,6 +753,26 @@ void Application::computeIdealFontPointSize()
 #endif
 }
 
+QString Application::painterPathToString(const QPainterPath &val) const
+{
+    QByteArray ret;
+    {
+        QDataStream ds(&ret, QIODevice::WriteOnly);
+        ds << val;
+    }
+
+    return QString::fromLatin1(ret.toHex());
+}
+
+QPainterPath Application::stringToPainterPath(const QString &val) const
+{
+    const QByteArray bytes = QByteArray::fromHex(val.toLatin1());
+    QDataStream ds(bytes);
+    QPainterPath path;
+    ds >> path;
+    return path;
+}
+
 QString Application::sanitiseFileName(const QString &fileName) const
 {
     const QFileInfo fi(fileName);
@@ -941,6 +967,89 @@ QPointF Application::globalMousePosition() const
     return QCursor::pos();
 }
 
+QString Application::camelCased(const QString &val) const
+{
+    if(TransliterationEngine::instance()->language() != TransliterationEngine::English)
+        return val;
+
+    QString val2 = val.toLower();
+
+    bool capitalize = true;
+    for(int i=0; i<val2.length(); i++)
+    {
+        QCharRef ch = val2[i];
+        if(capitalize)
+        {
+            if(ch.isLetterOrNumber() && ch.script() == QChar::Script_Latin)
+                ch = ch.toUpper();
+            capitalize = false;
+        }
+        else
+            capitalize = !ch.isLetterOrNumber();
+    }
+
+    return val2;
+}
+
+void Application::saveWindowGeometry(QWindow *window, const QString &group)
+{
+    if(window == nullptr)
+        return;
+
+    const QRect geometry = window->geometry();
+    if(window->visibility() == QWindow::Windowed)
+    {
+        const QString geometryString = QString("%1 %2 %3 %4")
+                .arg(geometry.x()).arg(geometry.y())
+                .arg(geometry.width()).arg(geometry.height());
+        m_settings->setValue( group + QStringLiteral("/windowGeometry"), geometryString );
+    }
+    else
+        m_settings->setValue( group + QStringLiteral("/windowGeometry"), QStringLiteral("Maximized") );
+}
+
+bool Application::restoreWindowGeometry(QWindow *window, const QString &group)
+{
+    if(window == nullptr)
+        return false;
+
+    const QScreen *screen = window->screen();
+    const QRect screenGeo = screen->availableGeometry();
+
+    const QString geometryString = m_settings->value(group + QStringLiteral("/windowGeometry")).toString();
+    if(geometryString == QStringLiteral("Maximized"))
+    {
+        window->setGeometry(screenGeo);
+        return true;
+    }
+
+    const QStringList geometry = geometryString.split(QStringLiteral(" "), QString::SkipEmptyParts);
+    if(geometry.length() != 4)
+    {
+        window->setGeometry(screenGeo);
+        return false;
+    }
+
+    const int x = geometry.at(0).toInt();
+    const int y = geometry.at(1).toInt();
+    const int w = geometry.at(2).toInt();
+    const int h = geometry.at(3).toInt();
+    QRect geo(x, y, w, h);
+    if(!screenGeo.contains(geo))
+    {
+        if(w > screenGeo.width() || h > screenGeo.height())
+        {
+            window->setGeometry(screenGeo);
+            return false;
+        }
+
+        geo.moveCenter(screenGeo.center());
+    }
+
+    window->setGeometry(geo);
+    return true;
+}
+
 void Application::initializeStandardColors(QQmlEngine *)
 {
     if(!m_standardColors.isEmpty())
@@ -1071,3 +1180,4 @@ bool Application::registerFileTypes()
 #endif
 #endif
 }
+

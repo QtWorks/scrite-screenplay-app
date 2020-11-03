@@ -28,6 +28,10 @@ Rectangle {
     property ScreenplayPageLayout pageLayout: screenplayFormat.pageLayout
     property alias source: screenplayAdapter.source
     property bool toolBarVisible: toolbar.visible
+    property var additionalCharacterMenuItems: []
+    property var additionalSceneMenuItems: []
+    signal additionalCharacterMenuItemClicked(string characterName, string menuItemName)
+    signal additionalSceneMenuItemClicked(Scene scene, string menuItemName)
 
     property alias zoomLevel: zoomSlider.zoomLevel
     property int zoomLevelModifier: 0
@@ -650,7 +654,7 @@ Rectangle {
                 height: {
                     if(expanded) {
                         if(contentItem.isCurrent)
-                            return contentInstance ? Math.max(contentInstance.contentHeight+50, 300) : 300
+                            return contentInstance ? Math.max(contentInstance.contentHeight+40, 300) : 300
                         return Math.min(300, parent.height)
                     }
                     return sceneHeadingAreaLoader.height
@@ -714,6 +718,7 @@ Rectangle {
                     sourceComponent: sceneHeadingArea
                     onItemChanged: {
                         if(item) {
+                            item.theElementIndex = contentItem.theIndex
                             item.theScene = contentItem.theScene
                             item.theElement = contentItem.theElement
                             item.sceneTextEditor = sceneTextEditor
@@ -806,7 +811,7 @@ Rectangle {
 
                         Rectangle {
                             id: cursorRectangle
-                            width: parent.width*1.5
+                            width: parent.width*Screen.devicePixelRatio
                             height: parent.height
                             anchors.centerIn: parent
                             color: scriteDocument.readOnly ? primaryColors.borderColor : "black"
@@ -820,7 +825,7 @@ Rectangle {
                                     target: cursorRectangle
                                     property: "width"
                                     duration: 250
-                                    from: sceneTextEditor.cursorRectangle.width*1.5
+                                    from: sceneTextEditor.cursorRectangle.width*Screen.devicePixelRatio
                                     to: sceneTextEditor.cursorRectangle.width*10
                                 }
 
@@ -1034,14 +1039,14 @@ Rectangle {
                                     focusPolicy: Qt.NoFocus
                                     text: "Copy\t" + app.polishShortcutTextForDisplay("Ctrl+C")
                                     enabled: sceneTextEditor.selectionEnd > sceneTextEditor.selectionStart
-                                    onClicked: { sceneTextEditor.copy(); editorContextMenu.close() }
+                                    onClicked: { sceneTextEditor.copy2(); editorContextMenu.close() }
                                 }
 
                                 MenuItem2 {
                                     focusPolicy: Qt.NoFocus
                                     text: "Paste\t" + app.polishShortcutTextForDisplay("Ctrl+V")
                                     enabled: sceneTextEditor.canPaste
-                                    onClicked: { sceneTextEditor.paste(); editorContextMenu.close() }
+                                    onClicked: { sceneTextEditor.paste2(); editorContextMenu.close() }
                                 }
 
                                 MenuSeparator {  }
@@ -1246,19 +1251,43 @@ Rectangle {
                         }
                     }
                     Keys.onPressed: {
-                        if(event.key === Qt.Key_PageUp) {
+                        event.accepted = false
+
+                        switch(event.key) {
+                        case Qt.Key_PageUp:
                             event.accepted = true
                             contentItem.scrollToPreviousScene()
-                        } else if(event.key === Qt.Key_PageDown) {
+                            break
+                        case Qt.Key_PageDown:
                             event.accepted = true
                             contentItem.scrollToNextScene()
-                        } else if(event.modifiers & Qt.ControlModifier && sceneTextEditor.cursorPosition === 0) {
-                            if(app.isMacOSPlatform && event.key === Qt.Key_Delete)
-                                contentItem.mergeWithPreviousScene()
-                            else if(event.key === Qt.Key_Backspace)
-                                contentItem.mergeWithPreviousScene()
-                        } else
-                            event.accepted = false
+                            break
+                        }
+
+                        if(event.modifiers === Qt.ControlModifier) {
+                            switch(event.key) {
+                            case Qt.Key_Delete:
+                                if(app.isMacOSPlatform && sceneTextEditor.cursorPosition === 0) {
+                                    event.accepted = true
+                                    contentItem.mergeWithPreviousScene()
+                                }
+                                break
+                            case Qt.Key_Backspace:
+                                if(sceneTextEditor.cursorPosition === 0) {
+                                    event.accepted = true
+                                    contentItem.mergeWithPreviousScene()
+                                }
+                                break
+                            case Qt.Key_C:
+                                event.accepted = true
+                                copy2()
+                                break
+                            case Qt.Key_V:
+                                event.accepted = true
+                                paste2()
+                                break
+                            }
+                        }
                     }
 
                     // Search & Replace
@@ -1302,7 +1331,30 @@ Rectangle {
                             }
                         }
                     }
+
+                    // Custom Copy & Paste
+                    function copy2() {
+                        if(hasSelection)
+                            sceneDocumentBinder.copy(selectionStart, selectionEnd)
+                    }
+
+                    function paste2() {
+                        if(canPaste) {
+                            if(!sceneDocumentBinder.paste(sceneTextEditor.cursorPosition))
+                                sceneTextEditor.paste()
+                        }
+                    }
                 }
+            }
+
+
+            Rectangle {
+                width: parent.width * 0.01
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                color: Qt.tint(contentItem.theScene.color, "#A7FFFFFF")
+                visible: screenplayAdapter.currentIndex === contentItem.theIndex
             }
 
             function mergeWithPreviousScene() {
@@ -1365,6 +1417,7 @@ Rectangle {
         Rectangle {
             id: headingItem
             property Scene theScene
+            property int theElementIndex: -1
             property bool sceneHasFocus: false
             property ScreenplayElement theElement
             property TextArea sceneTextEditor
@@ -1489,6 +1542,30 @@ Rectangle {
                                             onTriggered: headingItem.theScene.type = modelData.value
                                         }
                                     }
+                                }
+
+                                Repeater {
+                                    model: additionalSceneMenuItems.length ? 1 : 0
+
+                                    MenuSeparator { }
+                                }
+
+                                Repeater {
+                                    model: additionalSceneMenuItems
+
+                                    MenuItem2 {
+                                        text: modelData
+                                        onTriggered: {
+                                            scriteDocument.screenplay.currentElementIndex = headingItem.theElementIndex
+                                            additionalSceneMenuItemClicked(headingItem.theScene, modelData)
+                                        }
+                                    }
+                                }
+
+                                Repeater {
+                                    model: additionalSceneMenuItems.length ? 1 : 0
+
+                                    MenuSeparator { }
                                 }
 
                                 MenuItem2 {
@@ -2116,12 +2193,51 @@ Rectangle {
                     }
                 }
 
-                onClicked: {
+                onTriggered: {
                     reportGeneratorTimer.requestSource = this
                     reportGeneratorTimer.reportArgs = {"reportName": modelData.name, "configuration": {"characterNames": [characterMenu.characterName]}}
                     characterMenu.close()
                     characterMenu.characterName = ""
                 }
+            }
+        }
+
+        Repeater {
+            model: characterMenu.characterReports.length > 0 ? (additionalCharacterMenuItems.length ? 1 : 0) : 0
+
+            MenuSeparator { }
+        }
+
+        Repeater {
+            model: characterMenu.characterReports.length > 0 ? additionalCharacterMenuItems : []
+
+            MenuItem2 {
+                leftPadding: 15
+                rightPadding: 15
+                topPadding: 5
+                bottomPadding: 5
+                width: reportsMenu.width
+                height: 65
+                contentItem: Column {
+                    width: characterMenu.width - 30
+                    spacing: 5
+
+                    Text {
+                        font.bold: true
+                        font.pixelSize: 16
+                        text: modelData.name
+                    }
+
+                    Text {
+                        text: modelData.description
+                        width: parent.width
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: 12
+                        font.italic: true
+                    }
+                }
+
+                onTriggered: additionalCharacterMenuItemClicked(characterMenu.characterName, modelData.name)
             }
         }
     }

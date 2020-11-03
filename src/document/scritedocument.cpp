@@ -230,7 +230,7 @@ Scene *ScriteDocument::createNewScene()
 
     Scene *scene = new Scene(m_structure);
     scene->setColor(activeScene ? activeScene->color() : QColor("white"));
-    scene->setTitle("[" + QString::number(m_structure->elementCount()+1) + "] - Scene");
+    scene->setTitle("New Scene");
     scene->heading()->setEnabled(true);
     scene->heading()->setLocationType(activeScene ? activeScene->heading()->locationType() : "EXT");
     scene->heading()->setLocation(activeScene ? activeScene->heading()->location() : "SOMEWHERE");
@@ -1261,6 +1261,18 @@ void ScriteDocument::deserializeFromJson(const QJsonObject &json)
     // default Latin font.
     m_formatting->useUserSpecifiedFonts();
     m_printFormat->useUserSpecifiedFonts();
+
+    // Although its not specified anywhere that transitions must be right aligned,
+    // many writers who are early adopters of Scrite are insisting on it.
+    // So, going forward transition paragraphs will be right aligned by default.
+    if(version <= QVersionNumber(0,5,1))
+    {
+        SceneElementFormat *format = m_formatting->elementFormat(SceneElement::Transition);
+        format->setTextAlignment(Qt::AlignRight);
+
+        format = m_printFormat->elementFormat(SceneElement::Transition);
+        format->setTextAlignment(Qt::AlignRight);
+    }
 }
 
 QString ScriteDocument::polishFileName(const QString &givenFileName) const

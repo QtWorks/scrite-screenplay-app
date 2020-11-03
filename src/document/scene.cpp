@@ -414,10 +414,10 @@ QString SceneElement::formattedText() const
 
     switch(m_type)
     {
-    case SceneElement::Character:
     case SceneElement::Shot:
-    case SceneElement::Transition:
     case SceneElement::Heading:
+    case SceneElement::Character:
+    case SceneElement::Transition:
         return m_text.toUpper();
     default:
         break;
@@ -547,6 +547,7 @@ Scene::Scene(QObject *parent)
     connect(this, &Scene::colorChanged, this, &Scene::sceneChanged);
     connect(this, &Scene::noteCountChanged, this, &Scene::sceneChanged);
     connect(this, &Scene::elementCountChanged, this, &Scene::sceneChanged);
+    connect(this, &Scene::characterRelationshipGraphChanged, this, &Scene::sceneChanged);
     connect(m_heading, &SceneHeading::textChanged, this, &Scene::sceneChanged);
     connect(this, &Scene::sceneChanged, [=](){
         this->markAsModified();
@@ -1142,6 +1143,15 @@ Scene *Scene::fromByteArray(const QByteArray &bytes)
         return scene;
 
     return nullptr;
+}
+
+void Scene::setCharacterRelationshipGraph(const QJsonObject &val)
+{
+    if(m_characterRelationshipGraph == val)
+        return;
+
+    m_characterRelationshipGraph = val;
+    emit characterRelationshipGraphChanged();
 }
 
 void Scene::serializeToJson(QJsonObject &json) const

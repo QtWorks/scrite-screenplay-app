@@ -212,7 +212,7 @@ Item {
                 anchors.rightMargin: 2.5
                 anchors.topMargin: screenplayElementList.scrollBarRequired ? 5 : 10
                 anchors.bottomMargin: screenplayElementList.scrollBarRequired ? 17 : 10
-                color: primaryColors.button
+                color: primaryColors.button.background
                 border.color: primaryColors.borderColor
                 border.width: 1
                 opacity: parent.highlightAsDropArea ? 0.75 : 0.5
@@ -378,7 +378,7 @@ Item {
                         width: 24; height: 24
                         opacity: 0.5
                         showTooltip: false
-                        sceneType: elementItemDelegate.element.scene.type
+                        sceneType: elementItemDelegate.element.scene ? elementItemDelegate.element.scene.type : Scene.Standard
                     }
 
                     Image {
@@ -453,7 +453,7 @@ Item {
     }
 
     Loader {
-        active: scriteDocument.screenplay.elementCount === 0
+        active: enableDragDrop && scriteDocument.screenplay.elementCount === 0
         width: parent.width*0.5
         anchors.centerIn: parent
         sourceComponent: TextArea {

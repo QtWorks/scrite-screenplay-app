@@ -25,6 +25,8 @@ Item {
     width: 1350
     height: 700
 
+    enabled: !scriteDocument.loading
+
     FontMetrics {
         id: sceneEditorFontMetrics
         readonly property SceneElementFormat format: scriteDocument.formatting.elementFormat(SceneElement.Action)
@@ -43,6 +45,15 @@ Item {
         property real workspaceHeight
         property real screenplayEditorWidth: -1
         property bool scriptalayIntroduced: false
+        property bool showNotebookInStructure: false
+        property bool mouseWheelZoomsInCharacterGraph: app.isWindowsPlatform || app.isLinuxPlatform
+        property bool mouseWheelZoomsInStructureCanvas: app.isWindowsPlatform || app.isLinuxPlatform
+
+        onShowNotebookInStructureChanged: {
+            app.execLater(workspaceSettings, 100, function() {
+                mainTabBar.currentIndex = mainTabBar.currentIndex % (showNotebookInStructure ? 2 : 3)
+            })
+        }
     }
 
     Settings {
@@ -74,6 +85,15 @@ Item {
         property string characterLanguage: "Default"
         property string transitionLanguage: "Default"
         property string parentheticalLanguage: "Default"
+    }
+
+    Settings {
+        id: notebookSettings
+        fileName: app.settingsFilePath
+        category: "Notebook"
+        property int activeTab: 0 // 0 = Relationships, 1 = Notes
+        property int graphLayoutMaxTime: 1000
+        property int graphLayoutMaxIterations: 50000
     }
 
     Shortcut {
@@ -110,6 +130,38 @@ Item {
         ShortcutsModelItem.title: screenplayEditorSettings.enableAnimations ? "Disable Animations" : "Enable Animations"
         ShortcutsModelItem.shortcut: sequence
         onActivated: screenplayEditorSettings.enableAnimations = !screenplayEditorSettings.enableAnimations
+    }
+
+    Shortcut {
+        context: Qt.ApplicationShortcut
+        sequence: "Alt+1"
+        ShortcutsModelItem.group: "Application"
+        ShortcutsModelItem.title: "Screenplay"
+        ShortcutsModelItem.enabled: mainTabBar.currentIndex !== 0
+        ShortcutsModelItem.shortcut: sequence
+        onActivated: mainTabBar.currentIndex = 0
+    }
+
+    Shortcut {
+        context: Qt.ApplicationShortcut
+        sequence: "Alt+2"
+        ShortcutsModelItem.group: "Application"
+        ShortcutsModelItem.title: "Structure"
+        ShortcutsModelItem.enabled: mainTabBar.currentIndex !== 1
+        ShortcutsModelItem.shortcut: sequence
+        onActivated: mainTabBar.currentIndex = 1
+    }
+
+    Shortcut {
+        context: Qt.ApplicationShortcut
+        sequence: "Alt+3"
+        ShortcutsModelItem.group: "Application"
+        ShortcutsModelItem.title: "Notebook"
+        ShortcutsModelItem.enabled: enabled && mainTabBar.currentIndex !== 2
+        ShortcutsModelItem.shortcut: sequence
+        ShortcutsModelItem.visible: enabled
+        enabled: !workspaceSettings.showNotebookInStructure
+        onActivated: mainTabBar.currentIndex = 2
     }
 
     Rectangle {
@@ -874,42 +926,46 @@ Item {
                     menu: Menu2 {
                         width: 300
 
-                        MenuItem2 {
-                            text: "New File"
-                            onTriggered: fileNewButton.click()
-                        }
-
-                        MenuItem2 {
-                            text: "Open File"
-                            onTriggered: fileOpenButton.doOpen()
-                        }
-
                         Menu2 {
-                            title: "Open Recent"
-                            onAboutToShow: recentFilesMenu.prepareRecentFilesList()
-                            width: Math.min(documentUI.width * 0.75, 350)
+                            title: "File"
 
-                            Repeater {
-                                model: recentFilesMenu.recentFiles
+                            MenuItem2 {
+                                text: "New"
+                                onTriggered: fileNewButton.click()
+                            }
 
-                                MenuItem2 {
-                                    property string filePath: recentFilesMenu.recentFiles[recentFilesMenu.recentFiles.length-index-1]
-                                    text: recentFilesFontMetrics.elidedText("" + (index+1) + ". " + app.fileInfo(filePath).baseName, Qt.ElideMiddle, recentFilesMenu.width)
-                                    ToolTip.text: filePath
-                                    ToolTip.visible: hovered
-                                    onClicked: fileOpenButton.doOpen(filePath)
+                            MenuItem2 {
+                                text: "Open"
+                                onTriggered: fileOpenButton.doOpen()
+                            }
+
+                            Menu2 {
+                                title: "Recent"
+                                onAboutToShow: recentFilesMenu.prepareRecentFilesList()
+                                width: Math.min(documentUI.width * 0.75, 350)
+
+                                Repeater {
+                                    model: recentFilesMenu.recentFiles
+
+                                    MenuItem2 {
+                                        property string filePath: recentFilesMenu.recentFiles[recentFilesMenu.recentFiles.length-index-1]
+                                        text: recentFilesFontMetrics.elidedText("" + (index+1) + ". " + app.fileInfo(filePath).baseName, Qt.ElideMiddle, recentFilesMenu.width)
+                                        ToolTip.text: filePath
+                                        ToolTip.visible: hovered
+                                        onClicked: fileOpenButton.doOpen(filePath)
+                                    }
                                 }
                             }
-                        }
 
-                        MenuItem2 {
-                            text: "Save"
-                            onTriggered: cmdSave.doClick()
-                        }
+                            MenuItem2 {
+                                text: "Save"
+                                onTriggered: cmdSave.doClick()
+                            }
 
-                        MenuItem2 {
-                            text: "Save As"
-                            onTriggered: fileDialog.launch("SAVE")
+                            MenuItem2 {
+                                text: "Save As"
+                                onTriggered: fileDialog.launch("SAVE")
+                            }
                         }
 
                         MenuSeparator { }
@@ -923,7 +979,7 @@ Item {
                         MenuSeparator { }
 
                         Menu2 {
-                            title: "Import, Export &amp; Reports"
+                            title: "Import, Export, Reports"
 
                             Menu2 {
                                 title: "Import"
@@ -1014,6 +1070,32 @@ Item {
 
                         MenuSeparator { }
 
+                        Menu {
+                            title: "View"
+                            width: 250
+
+                            MenuItem2 {
+                                text: "Screenplay (" + app.polishShortcutTextForDisplay("Alt+1") + ")"
+                                onTriggered: mainTabBar.currentIndex = 0
+                                font.bold: mainTabBar.currentIndex === 0
+                            }
+
+                            MenuItem2 {
+                                text: "Structure (" + app.polishShortcutTextForDisplay("Alt+2") + ")"
+                                onTriggered: mainTabBar.currentIndex = 1
+                                font.bold: mainTabBar.currentIndex === 1
+                            }
+
+                            MenuItem2 {
+                                text: "Notebook (" + app.polishShortcutTextForDisplay("Alt+3") + ")"
+                                onTriggered: mainTabBar.currentIndex = 2
+                                font.bold: mainTabBar.currentIndex === 2
+                                enabled: !workspaceSettings.showNotebookInStructure
+                            }
+                        }
+
+                        MenuSeparator { }
+
                         MenuItem2 {
                             text: "Settings"
                             enabled: documentUI.width >= 1100
@@ -1033,6 +1115,7 @@ Item {
             id: editTools
             x: appToolBar.visible ? (parent.width - appLogo.width - width) : (appToolsMenu.x + (parent.width - width - appToolsMenu.width - appToolsMenu.x) / 2)
             height: parent.height
+            spacing: 2
 
             ScreenplayEditorToolbar {
                 id: globalScreenplayEditorToolbar
@@ -1047,11 +1130,10 @@ Item {
                 id: mainTabBar
                 height: parent.height
                 visible: appToolBar.visible
-                onVisibleChanged: currentIndex = 0
 
                 property Item currentTab: currentIndex >= 0 && mainTabBarRepeater.count === tabs.length ? mainTabBarRepeater.itemAt(currentIndex) : null
                 property int currentIndex: -1
-                readonly property var tabs: ["Screenplay", "Structure", "Notebook"]
+                readonly property var tabs: workspaceSettings.showNotebookInStructure ? ["Screenplay", "Structure"] : ["Screenplay", "Structure", "Notebook"]
                 property var currentTabP1: currentTabExtents.value.p1
                 property var currentTabP2: currentTabExtents.value.p2
                 readonly property color activeTabColor: primaryColors.windowColor
@@ -1260,12 +1342,40 @@ Item {
         ScreenplayEditor {
             zoomLevelModifier: screenplayZoomLevelModifier
             source: sourceBinder.get
+            additionalCharacterMenuItems: {
+                if(mainTabBar.currentIndex === 1) {
+                    if(workspaceSettings.showNotebookInStructure)
+                        return [{"name": "Character Notes", "description": "Create/switch to notes for the character in notebook"}]
+                }
+                return []
+            }
+            additionalSceneMenuItems: {
+                if(mainTabBar.currentIndex === 1) {
+                    if(workspaceSettings.showNotebookInStructure)
+                        return ["Scene Notes"]
+                }
+                return []
+            }
+
+            onAdditionalCharacterMenuItemClicked: {
+                if(menuItemName === "Character Notes" && workspaceSettings.showNotebookInStructure) {
+                    var ch = scriteDocument.structure.findCharacter(characterName)
+                    if(ch === null)
+                        scriteDocument.structure.addCharacter(characterName)
+                    Announcement.shout("7D6E5070-79A0-4FEE-8B5D-C0E0E31F1AD8", characterName)
+                }
+            }
+
+            onAdditionalSceneMenuItemClicked: {
+                if(menuItemName === "Scene Notes")
+                    Announcement.shout("41EE5E06-FF97-4DB6-B32D-F938418C9529", scene)
+            }
 
             DelayedPropertyBinder {
                 id: sourceBinder
                 initial: null
                 set: {
-                    if(editCurrentSceneInStructure) {
+                    if(editCurrentSceneInStructure && scriteDocument.screenplay.currentElementIndex < 0) {
                         var index = scriteDocument.structure.currentElementIndex
                         var element = scriteDocument.structure.elementAt(index)
                         return element ? element.scene : null
@@ -1306,21 +1416,59 @@ Item {
                         SplitView.fillWidth: true
                         color: primaryColors.c10.background
                         border {
-                            width: 1
+                            width: workspaceSettings.showNotebookInStructure ? 0 : 1
                             color: primaryColors.borderColor
                         }
 
-                        StructureView {
+                        TabView3 {
+                            id: structureEditorTabs
                             anchors.fill: parent
                             anchors.margins: 1
-                            onRequestEditor: screenplayEditor2.editCurrentSceneInStructure = true
-                            onReleaseEditor: screenplayEditor2.editCurrentSceneInStructure = false
+                            tabNames: workspaceSettings.showNotebookInStructure ? ["Canvas", "Notebook"] : ["Canvas"]
+                            tabColor: primaryColors.c700.background
+                            tabBarVisible: workspaceSettings.showNotebookInStructure
+                            currentTabContent: Item {
+                                Announcement.onIncoming: {
+                                    if(workspaceSettings.showNotebookInStructure) {
+                                        if(structureEditorTabs.currentTabIndex === 0)
+                                            structureEditorTabs.currentTabIndex = 1
+
+                                        if(type === "7D6E5070-79A0-4FEE-8B5D-C0E0E31F1AD8")
+                                            app.execLater(notebookViewLoader, 100, function() {
+                                                notebookViewLoader.item.switchToCharacterTab(data)
+                                            })
+                                        else if(type === "41EE5E06-FF97-4DB6-B32D-F938418C9529")
+                                            app.execLater(notebookViewLoader, 100, function() {
+                                                notebookViewLoader.item.switchToSceneTab(data)
+                                            })
+                                    }
+                                }
+
+                                Loader {
+                                    id: structureViewLoader
+                                    anchors.fill: parent
+                                    active: !workspaceSettings.showNotebookInStructure || structureEditorTabs.currentTabIndex === 0
+                                    sourceComponent: StructureView {
+                                        onRequestEditor: screenplayEditor2.editCurrentSceneInStructure = scriteDocument.screenplay.currentElementIndex < 0
+                                        onReleaseEditor: screenplayEditor2.editCurrentSceneInStructure = false
+                                    }
+                                }
+
+                                Loader {
+                                    id: notebookViewLoader
+                                    anchors.fill: parent
+                                    active: workspaceSettings.showNotebookInStructure && structureEditorTabs.currentTabIndex === 1
+                                    sourceComponent: NotebookView {
+
+                                    }
+                                }
+                            }
                         }
                     }
 
                     Loader {
                         id: screenplayEditor2
-                        SplitView.preferredWidth: workspaceSettings.screenplayEditorWidth < 0 ? scriteDocument.formatting.pageLayout.paperWidth * 1.4 : workspaceSettings.screenplayEditorWidth
+                        SplitView.preferredWidth: workspaceSettings.screenplayEditorWidth < 0 ? ui.width * 0.5 : workspaceSettings.screenplayEditorWidth
                         onWidthChanged: workspaceSettings.screenplayEditorWidth = width
                         property bool editCurrentSceneInStructure: true
                         readonly property int screenplayZoomLevelModifier: -3
@@ -1349,6 +1497,7 @@ Item {
                         anchors.fill: parent
                         anchors.margins: 5
                         onRequestEditor: screenplayEditor2.editCurrentSceneInStructure = false
+                        showNotesIcon: workspaceSettings.showNotebookInStructure
                     }
                 }
             }
@@ -1627,6 +1776,8 @@ Item {
             target: qmlWindow
             onClosing: {
                 if(closeEventHandler.handleCloseEvent) {
+                    app.saveWindowGeometry(qmlWindow, "Workspace")
+
                     if(!scriteDocument.modified) {
                         close.accepted = true
                         return
@@ -1657,7 +1808,7 @@ Item {
     }
 
     QtObject {
-        ShortcutsModelItem.enabled: qmlWindow.activeFocusItem !== null
+        ShortcutsModelItem.enabled: app.isTextInputItem(qmlWindow.activeFocusItem)
         ShortcutsModelItem.priority: 10
         ShortcutsModelItem.group: "Formatting"
         ShortcutsModelItem.title: "Symbols & Smileys"
@@ -1722,5 +1873,16 @@ Item {
                 content = null
             }
         }
+    }
+
+    Loader {
+        active: automationScript !== ""
+        source: automationScript
+        onSourceChanged: console.log("PA: " + source)
+    }
+
+    Component.onCompleted: {
+        if(!app.restoreWindowGeometry(qmlWindow, "Workspace"))
+            workspaceSettings.screenplayEditorWidth = -1
     }
 }

@@ -4,6 +4,9 @@ TARGET = Scrite
 
 DEFINES += PHTRANSLATE_STATICLIB
 
+#DEFINES += SCRITE_ENABLE_AUTOMATION
+#QT += testlib
+
 CONFIG(release, debug|release): {
     DEFINES += QT_NO_DEBUG_OUTPUT
     CONFIG += qtquickcompiler
@@ -21,7 +24,8 @@ INCLUDEPATH += . \
         ./src/utils \
         ./src/document \
         ./src/interfaces \
-        ./src/reports
+        ./src/reports \
+        ./src/automation
 
 HEADERS += \
     3rdparty/phtranslator/LanguageCodes.h \
@@ -36,12 +40,22 @@ HEADERS += \
     3rdparty/poly2tri/sweep/cdt.h \
     3rdparty/poly2tri/sweep/sweep.h \
     3rdparty/poly2tri/sweep/sweep_context.h \
+    src/automation/automation.h \
+    src/automation/automationrecorder.h \
+    src/automation/eventautomationstep.h \
+    src/automation/pausestep.h \
+    src/automation/scriptautomationstep.h \
+    src/automation/windowcapture.h \
     src/core/objectlistpropertymodel.h \
     src/core/qobjectproperty.h \
     src/core/systemtextinputmanager.h \
+    src/document/characterrelationshipsgraph.h \
+    src/document/notebooktabmodel.h \
     src/importers/openfromlibrary.h \
     src/printing/qtextdocumentpagedprinter.h \
     src/printing/imageprinter.h \
+    src/quick/objects/announcement.h \
+    src/quick/objects/tabsequencemanager.h \
     src/quick/objects/delayedpropertybinder.h \
     src/quick/objects/notification.h \
     src/quick/objects/fileinfo.h \
@@ -68,6 +82,7 @@ HEADERS += \
     src/reports/locationreport.h \
     src/reports/scenecharactermatrixreport.h \
     src/utils/execlatertimer.h \
+    src/utils/graphlayout.h \
     src/utils/timeprofiler.h \
     src/utils/garbagecollector.h \
     src/utils/hourglass.h \
@@ -120,11 +135,22 @@ SOURCES += \
     3rdparty/poly2tri/sweep/cdt.cc \
     3rdparty/poly2tri/sweep/sweep.cc \
     3rdparty/poly2tri/sweep/sweep_context.cc \
+    src/automation/automation.cpp \
+    src/automation/automation_module.cpp \
+    src/automation/automationrecorder.cpp \
+    src/automation/eventautomationstep.cpp \
+    src/automation/pausestep.cpp \
+    src/automation/scriptautomationstep.cpp \
+    src/automation/windowcapture.cpp \
     src/core/qobjectproperty.cpp \
     src/core/systemtextinputmanager.cpp \
+    src/document/characterrelationshipsgraph.cpp \
+    src/document/notebooktabmodel.cpp \
     src/importers/openfromlibrary.cpp \
     src/printing/qtextdocumentpagedprinter.cpp \
     src/printing/imageprinter.cpp \
+    src/quick/objects/announcement.cpp \
+    src/quick/objects/tabsequencemanager.cpp \
     src/quick/objects/fileinfo.cpp \
     src/quick/objects/focustracker.cpp \
     src/quick/objects/delayedpropertybinder.cpp \
@@ -152,6 +178,7 @@ SOURCES += \
     src/reports/scenecharactermatrixreport.cpp \
     src/utils/execlatertimer.cpp \
     src/utils/genericarraymodel.cpp \
+    src/utils/graphlayout.cpp \
     src/utils/timeprofiler.cpp \
     src/utils/garbagecollector.cpp \
     src/utils/qobjectserializer.cpp \
@@ -197,6 +224,7 @@ RESOURCES += \
     scrite_hindi_font.qrc \
     scrite_kannada_font.qrc \
     scrite_malayalam_font.qrc \
+    scrite_marathi_font.qrc \
     scrite_misc.qrc \
     scrite_oriya_font.qrc \
     scrite_punjabi_font.qrc \

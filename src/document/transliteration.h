@@ -50,6 +50,7 @@ public:
         Hindi,
         Kannada,
         Malayalam,
+        Marathi,
         Oriya,
         Punjabi,
         Sanskrit,

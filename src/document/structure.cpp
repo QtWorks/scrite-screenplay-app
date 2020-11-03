@@ -17,6 +17,8 @@
 #include "scritedocument.h"
 #include "garbagecollector.h"
 
+#include <QDir>
+#include <QStack>
 #include <QMimeData>
 #include <QDateTime>
 #include <QClipboard>
@@ -252,12 +254,221 @@ void StructureElement::syncWithFollowItem()
 
 ///////////////////////////////////////////////////////////////////////////////
 
+Relationship::Relationship(QObject *parent)
+    : QObject(parent),
+      m_with(this, "with")
+{
+    m_of = qobject_cast<Character*>(parent);
+
+    connect(this, &Relationship::ofChanged, this, &Relationship::relationshipChanged);
+    connect(this, &Relationship::nameChanged, this, &Relationship::relationshipChanged);
+    connect(this, &Relationship::withChanged, this, &Relationship::relationshipChanged);
+    connect(this, &Relationship::directionChanged, this, &Relationship::relationshipChanged);
+    connect(this, &Relationship::noteCountChanged, this, &Relationship::relationshipChanged);
+}
+
+Relationship::~Relationship()
+{
+    emit aboutToDelete(this);
+}
+
+void Relationship::setDirection(Relationship::Direction val)
+{
+    if(m_direction == val)
+        return;
+
+    m_direction = val;
+    emit directionChanged();
+}
+
+QString Relationship::polishName(const QString &val)
+{
+    return Application::instance()->camelCased(val);
+}
+
+void Relationship::setName(const QString &val)
+{
+    const QString val2 = polishName(val);
+    if(m_name == val2)
+        return;
+
+    m_name = val2;
+    emit nameChanged();
+
+    if(m_with != nullptr)
+    {
+        Relationship *rel = m_with->findRelationship(m_of);
+        if(rel && rel != this)
+            rel->setName(m_name);
+    }
+}
+
+void Relationship::setWith(Character *val)
+{
+    if(m_with == val)
+        return;
+
+    m_with = val;
+    emit withChanged();
+}
+
+QQmlListProperty<Note> Relationship::notes()
+{
+    return QQmlListProperty<Note>(
+                reinterpret_cast<QObject*>(this),
+                static_cast<void*>(this),
+                &Relationship::staticAppendNote,
+                &Relationship::staticNoteCount,
+                &Relationship::staticNoteAt,
+                &Relationship::staticClearNotes);
+}
+
+void Relationship::addNote(Note *ptr)
+{
+    if(ptr == nullptr || m_notes.indexOf(ptr) >= 0)
+        return;
+
+    ptr->setParent(this);
+
+    connect(ptr, &Note::aboutToDelete, this, &Relationship::removeNote);
+    connect(ptr, &Note::noteChanged, this, &Relationship::relationshipChanged);
+
+    m_notes.append(ptr);
+    emit noteCountChanged();
+}
+
+void Relationship::removeNote(Note *ptr)
+{
+    if(ptr == nullptr)
+        return;
+
+    const int index = m_notes.indexOf(ptr);
+    if(index < 0)
+        return;
+
+    m_notes.removeAt(index);
+    if(ptr->parent() == this)
+        GarbageCollector::instance()->add(ptr);
+
+    disconnect(ptr, &Note::aboutToDelete, this, &Relationship::removeNote);
+    disconnect(ptr, &Note::noteChanged, this, &Relationship::relationshipChanged);
+
+    emit noteCountChanged();
+}
+
+Note *Relationship::noteAt(int index) const
+{
+    return index < 0 || index >= m_notes.size() ? nullptr : m_notes.at(index);
+}
+
+void Relationship::clearNotes()
+{
+    while(m_notes.size())
+        this->removeNote(m_notes.first());
+}
+
+void Relationship::serializeToJson(QJsonObject &json) const
+{
+
+    if(m_with != nullptr)
+        json.insert("with", m_with->name());
+}
+
+void Relationship::deserializeFromJson(const QJsonObject &json)
+{
+    m_withName = json.value("with").toString();
+}
+
+void Relationship::resolveRelationship()
+{
+    if(!m_withName.isEmpty())
+    {
+        Structure *structure = nullptr;
+        if(m_of != nullptr)
+            structure = m_of->structure();
+        else
+            structure = ScriteDocument::instance()->structure();
+
+        m_with = structure->findCharacter(m_withName);
+        m_withName.clear();
+
+        if(m_with != nullptr)
+            emit withChanged();
+        else
+            this->deleteLater();
+    }
+}
+
+void Relationship::staticAppendNote(QQmlListProperty<Note> *list, Note *ptr)
+{
+    reinterpret_cast< Relationship* >(list->data)->addNote(ptr);
+}
+
+void Relationship::staticClearNotes(QQmlListProperty<Note> *list)
+{
+    reinterpret_cast< Relationship* >(list->data)->clearNotes();
+}
+
+Note *Relationship::staticNoteAt(QQmlListProperty<Note> *list, int index)
+{
+    return reinterpret_cast< Relationship* >(list->data)->noteAt(index);
+}
+
+int Relationship::staticNoteCount(QQmlListProperty<Note> *list)
+{
+    return reinterpret_cast< Relationship* >(list->data)->noteCount();
+}
+
+bool Relationship::event(QEvent *event)
+{
+    if(event->type() == QEvent::ParentChange)
+    {
+        if(m_of == nullptr)
+        {
+            m_of = qobject_cast<Character*>(this->parent());
+            emit ofChanged();
+        }
+        else if(m_of != this->parent())
+            qFatal("Relationship of a character, once set, cannot be changed.");
+    }
+
+    return QObject::event(event);
+}
+
+void Relationship::setOf(Character *val)
+{
+    if(m_of == val)
+        return;
+
+    m_of = val;
+    emit ofChanged();
+}
+
+void Relationship::resetWith()
+{
+    m_with = nullptr;
+    emit withChanged();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 Character::Character(QObject *parent)
     : QObject(parent),
       m_structure(qobject_cast<Structure*>(parent))
 {
+    connect(this, &Character::ageChanged, this, &Character::characterChanged);
     connect(this, &Character::nameChanged, this, &Character::characterChanged);
+    connect(this, &Character::typeChanged, this, &Character::characterChanged);
+    connect(this, &Character::weightChanged, this, &Character::characterChanged);
+    connect(this, &Character::photosChanged, this, &Character::characterChanged);
+    connect(this, &Character::heightChanged, this, &Character::characterChanged);
+    connect(this, &Character::genderChanged, this, &Character::characterChanged);
+    connect(this, &Character::aliasesChanged, this, &Character::characterChanged);
+    connect(this, &Character::bodyTypeChanged, this, &Character::characterChanged);
     connect(this, &Character::noteCountChanged, this, &Character::characterChanged);
+    connect(this, &Character::designationChanged, this, &Character::characterChanged);
+    connect(this, &Character::relationshipCountChanged, this, &Character::characterChanged);
+    connect(this, &Character::characterRelationshipGraphChanged, this, &Character::characterChanged);
 }
 
 Character::~Character()
@@ -272,6 +483,15 @@ void Character::setName(const QString &val)
 
     m_name = val.toUpper().trimmed();
     emit nameChanged();
+}
+
+void Character::setVisibleOnNotebook(bool val)
+{
+    if(m_visibleOnNotebook == val)
+        return;
+
+    m_visibleOnNotebook = val;
+    emit visibleOnNotebookChanged();
 }
 
 QQmlListProperty<Note> Character::notes()
@@ -305,9 +525,11 @@ void Character::removeNote(Note *ptr)
 
     const int index = m_notes.indexOf(ptr);
     if(index < 0)
-        return ;
+        return;
 
     m_notes.removeAt(index);
+    if(ptr->parent() == this)
+        GarbageCollector::instance()->add(ptr);
 
     disconnect(ptr, &Note::aboutToDelete, this, &Character::removeNote);
     disconnect(ptr, &Note::noteChanged, this, &Character::characterChanged);
@@ -326,12 +548,388 @@ void Character::clearNotes()
         this->removeNote(m_notes.first());
 }
 
+void Character::setPhotos(const QStringList &val)
+{
+    if(m_photos == val || !m_photos.isEmpty())
+        return;
+
+    DocumentFileSystem *dfs = m_structure->scriteDocument()->fileSystem();
+
+    m_photos.reserve(val.size());
+    Q_FOREACH(QString item, val)
+    {
+        if( dfs->contains(item) )
+            m_photos << dfs->absolutePath(item);
+    }
+
+    emit photosChanged();
+}
+
+void Character::addPhoto(const QString &photoPath)
+{
+    DocumentFileSystem *dfs = m_structure->scriteDocument()->fileSystem();
+
+    const QString dstPath = QStringLiteral("characters/") + QString::number(QDateTime::currentMSecsSinceEpoch()) + QStringLiteral(".jpg");
+    const QString dfsPath = dfs->addImage(photoPath, dstPath, QSize(512,512), true);
+    if(dfsPath.isEmpty())
+        return;
+
+    m_photos << dfs->absolutePath(dfsPath);
+    emit photosChanged();
+}
+
+void Character::removePhoto(int index)
+{
+    if(index < 0 || index >= m_photos.size())
+        return;
+
+    DocumentFileSystem *dfs = m_structure->scriteDocument()->fileSystem();
+
+    const QString dfsPath = dfs->relativePath(m_photos.at(index));
+    if(dfsPath.isEmpty())
+        return;
+
+    if(dfs->remove(dfsPath))
+    {
+        m_photos.removeAt(index);
+        emit photosChanged();
+    }
+}
+
+void Character::removePhoto(const QString &photoPath)
+{
+    DocumentFileSystem *dfs = m_structure->scriteDocument()->fileSystem();
+
+    const QString dfsPath = dfs->absolutePath(photoPath);
+    if(dfsPath.isEmpty())
+        return;
+
+    const int index = m_photos.indexOf(photoPath);
+    this->removePhoto(index);
+}
+
+void Character::setType(const QString &val)
+{
+    if(m_type == val)
+        return;
+
+    m_type = val;
+    emit typeChanged();
+}
+
+void Character::setDesignation(const QString &val)
+{
+    if(m_designation == val)
+        return;
+
+    m_designation = val;
+    emit designationChanged();
+}
+
+void Character::setGender(const QString &val)
+{
+    if(m_gender == val)
+        return;
+
+    m_gender = val;
+    emit genderChanged();
+}
+
+void Character::setAge(const QString &val)
+{
+    if( m_age == val )
+        return;
+
+    m_age = val;
+    emit ageChanged();
+}
+
+void Character::setHeight(const QString &val)
+{
+    if( m_height == val )
+        return;
+
+    m_height = val;
+    emit heightChanged();
+}
+
+void Character::setWeight(const QString &val)
+{
+    if(m_weight == val)
+        return;
+
+    m_weight = val;
+    emit weightChanged();
+}
+
+void Character::setBodyType(const QString &val)
+{
+    if(m_bodyType == val)
+        return;
+
+    m_bodyType = val;
+    emit bodyTypeChanged();
+}
+
+void Character::setAliases(const QStringList &val)
+{
+    if(m_aliases == val)
+        return;
+
+    m_aliases.clear();
+    Q_FOREACH(QString item, val)
+        m_aliases << item.trimmed();
+
+    emit aliasesChanged();
+}
+
+QQmlListProperty<Relationship> Character::relationships()
+{
+    return QQmlListProperty<Relationship>(
+                reinterpret_cast<QObject*>(this),
+                static_cast<void*>(this),
+                &Character::staticAppendRelationship,
+                &Character::staticRelationshipCount,
+                &Character::staticRelationshipAt,
+                &Character::staticClearRelationships);
+}
+
+void Character::addRelationship(Relationship *ptr)
+{
+    if(ptr == nullptr || m_relationships.indexOf(ptr) >= 0)
+        return;
+
+    ptr->setParent(this);
+
+    connect(ptr, &Relationship::aboutToDelete, this, &Character::removeRelationship);
+    connect(ptr, &Relationship::relationshipChanged, this, &Character::characterChanged);
+
+    m_relationships.append(ptr);
+
+    emit relationshipCountChanged();
+}
+
+void Character::removeRelationship(Relationship *ptr)
+{
+    if(ptr == nullptr)
+        return;
+
+    const int index = m_relationships.indexOf(ptr);
+    if(index < 0)
+        return;
+
+    m_relationships.removeAt(index);
+    if(ptr->parent() == this)
+        GarbageCollector::instance()->add(ptr);
+
+    disconnect(ptr, &Relationship::aboutToDelete, this, &Character::removeRelationship);
+    disconnect(ptr, &Relationship::relationshipChanged, this, &Character::characterChanged);
+
+    emit relationshipCountChanged();
+}
+
+Relationship *Character::relationshipAt(int index) const
+{
+    return index < 0 || index >= m_relationships.size() ? nullptr : m_relationships.at(index);
+}
+
+void Character::clearRelationships()
+{
+    while(m_relationships.size())
+        this->removeRelationship(m_relationships.first());
+}
+
+Relationship *Character::addRelationship(const QString &name, Character *with)
+{
+    Relationship *relationship = nullptr;
+    if(with == nullptr || with == this)
+        return nullptr;
+
+    // Find out if we have already established this relationsip.
+    relationship = this->findRelationship(with);
+    if(relationship != nullptr)
+    {
+        relationship->setName(name);
+        return relationship;
+    }
+
+    // Create a new with-of relationship
+    Relationship *withOf = new Relationship(with);
+    withOf->setName(name);
+    withOf->setWith(this);
+    withOf->setDirection(Relationship::WithOf);
+    with->addRelationship(withOf);
+
+    // Create new of-with relationship
+    Relationship *ofWith = new Relationship(this);
+    ofWith->setName(name);
+    ofWith->setWith(with);
+    ofWith->setDirection(Relationship::OfWith);
+    this->addRelationship(ofWith);
+
+    // Ensure that if one of the relationships is destroyed, the other
+    // must destroy itself.
+    connect(withOf, &Relationship::aboutToDelete, ofWith, &Relationship::deleteLater);
+    connect(ofWith, &Relationship::aboutToDelete, withOf, &Relationship::deleteLater);
+
+    // Return the newly created relationship
+    return ofWith;
+}
+
+Relationship *Character::findRelationshipWith(const QString &with) const
+{
+    const QString with2 = with.toUpper().simplified().trimmed();
+    if(with2 == m_name)
+        return nullptr;
+
+    Q_FOREACH(Relationship *rel, m_relationships.list())
+    {
+        if(rel->with()->name() == with2)
+            return rel;
+    }
+
+    return nullptr;
+}
+
+Relationship *Character::findRelationship(Character *with) const
+{
+    if(with == nullptr || with == this)
+        return nullptr;
+
+    Q_FOREACH(Relationship *rel, m_relationships.list())
+    {
+        if(rel->with() == with)
+            return rel;
+    }
+
+    return nullptr;
+}
+
+bool Character::isRelatedTo(Character *with) const
+{
+    QStack<Character*> stack;
+    return this->isRelatedToImpl(with, stack);
+}
+
+QList<Relationship *> Character::findRelationshipsWith(const QString &name) const
+{
+    QList<Relationship*> ret;
+
+    const QString name2 = Relationship::polishName(name);
+    Q_FOREACH(Relationship *rel, m_relationships.list())
+    {
+        if(rel->name() == name2)
+            ret << rel;
+    }
+
+    return ret;
+}
+
+QStringList Character::unrelatedCharacterNames() const
+{
+    const QStringList names = this->structure()->characterNames();
+
+    QStringList ret;
+    Q_FOREACH(QString name, names)
+    {
+        if(this->name() == name || this->hasRelationshipWith(name))
+            continue;
+
+        ret << name;
+    }
+
+    return ret;
+}
+
+void Character::setCharacterRelationshipGraph(const QJsonObject &val)
+{
+    if(m_characterRelationshipGraph == val)
+        return;
+
+    m_characterRelationshipGraph = val;
+    emit characterRelationshipGraphChanged();
+}
+
+void Character::serializeToJson(QJsonObject &json) const
+{
+    DocumentFileSystem *dfs = m_structure->scriteDocument()->fileSystem();
+    QJsonArray array;
+    Q_FOREACH(QString photo, m_photos)
+        array.append( dfs->relativePath(photo) );
+    json.insert("photos", array);
+}
+
+void Character::deserializeFromJson(const QJsonObject &json)
+{
+    DocumentFileSystem *dfs = m_structure->scriteDocument()->fileSystem();
+    const QJsonArray array = json.value("photos").toArray();
+
+    QStringList photoPaths;
+    for(int i=0; i<array.size(); i++)
+    {
+        QString path = array.at(i).toString();
+        if( QDir::isAbsolutePath(path) )
+            continue;
+
+        path = dfs->absolutePath(path);
+        if( path.isEmpty() || !QFile::exists(path) )
+            continue;
+
+        QImage image(path);
+        if(image.isNull())
+            continue;
+
+        photoPaths.append(path);
+    }
+
+    if(m_photos != photoPaths)
+    {
+        m_photos = photoPaths;
+        emit photosChanged();
+    }
+}
+
+void Character::resolveRelationships()
+{
+    Q_FOREACH(Relationship *rel, m_relationships.list())
+        rel->resolveRelationship();
+}
+
 bool Character::event(QEvent *event)
 {
     if(event->type() == QEvent::ParentChange)
         m_structure = qobject_cast<Structure*>(this->parent());
 
     return QObject::event(event);
+}
+
+bool Character::isRelatedToImpl(Character *with, QStack<Character *> &stack) const
+{
+    if(with == nullptr || with == this)
+        return false;
+
+    QList<Relationship*> rels = m_relationships.list();
+    for(Relationship *rel : rels)
+    {
+        Character *rwith = rel->with();
+        if(rwith == nullptr)
+            continue;
+
+        if(rwith == with)
+            return true;
+
+        if(stack.contains(rwith))
+            continue;
+
+        stack.push(rwith);
+        const bool flag = rwith->isRelatedToImpl(with, stack);
+        stack.pop();
+
+        if(flag)
+            return flag;
+    }
+
+    return false;
 }
 
 void Character::staticAppendNote(QQmlListProperty<Note> *list, Note *ptr)
@@ -352,6 +950,26 @@ Note *Character::staticNoteAt(QQmlListProperty<Note> *list, int index)
 int Character::staticNoteCount(QQmlListProperty<Note> *list)
 {
     return reinterpret_cast< Character* >(list->data)->noteCount();
+}
+
+void Character::staticAppendRelationship(QQmlListProperty<Relationship> *list, Relationship *ptr)
+{
+    reinterpret_cast< Character* >(list->data)->addRelationship(ptr);
+}
+
+void Character::staticClearRelationships(QQmlListProperty<Relationship> *list)
+{
+    reinterpret_cast< Character* >(list->data)->clearRelationships();
+}
+
+Relationship *Character::staticRelationshipAt(QQmlListProperty<Relationship> *list, int index)
+{
+    return reinterpret_cast< Character* >(list->data)->relationshipAt(index);
+}
+
+int Character::staticRelationshipCount(QQmlListProperty<Relationship> *list)
+{
+    return reinterpret_cast< Character* >(list->data)->relationshipCount();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -578,6 +1196,7 @@ Structure::Structure(QObject *parent)
     connect(this, &Structure::elementCountChanged, this, &Structure::structureChanged);
     connect(this, &Structure::annotationCountChanged, this, &Structure::structureChanged);
     connect(this, &Structure::currentElementIndexChanged, this, &Structure::structureChanged);
+    connect(this, &Structure::characterRelationshipGraphChanged, this, &Structure::structureChanged);
 
     QClipboard *clipboard = qApp->clipboard();
     connect(clipboard, &QClipboard::dataChanged, this, &Structure::onClipboardDataChanged);
@@ -718,23 +1337,32 @@ QJsonArray Structure::detectCharacters() const
     return ret;
 }
 
+Character *Structure::addCharacter(const QString &name)
+{
+    const QString name2 = name.toUpper().simplified().trimmed();
+    if(name2.isEmpty())
+        return nullptr;
+
+    Character *character = this->findCharacter(name2);
+    if(character == nullptr)
+    {
+        character = new Character(this);
+        character->setName(name2);
+        this->addCharacter(character);
+    }
+
+    return character;
+}
+
 void Structure::addCharacters(const QStringList &names)
 {
     Q_FOREACH(QString name, names)
-    {
-        Character *character = this->findCharacter(name);
-        if(character == nullptr)
-        {
-            character = new Character(this);
-            character->setName(name);
-            this->addCharacter(character);
-        }
-    }
+        this->addCharacter(name);
 }
 
 Character *Structure::findCharacter(const QString &name) const
 {
-    const QString name2 = name.toUpper();
+    const QString name2 = name.trimmed().toUpper();
     Q_FOREACH(Character *character, m_characters.list())
     {
         if(character->name() == name2)
@@ -742,6 +1370,19 @@ Character *Structure::findCharacter(const QString &name) const
     }
 
     return nullptr;
+}
+
+QList<Character *> Structure::findCharacters(const QStringList &names, bool returnAssociativeList) const
+{
+    QList<Character*> ret;
+    for(const QString &name: names)
+    {
+        Character *character = this->findCharacter(name);
+        if(returnAssociativeList || character != nullptr)
+            ret << character;
+    }
+
+    return ret;
 }
 
 QQmlListProperty<Note> Structure::notes()
@@ -1172,7 +1813,8 @@ void Structure::removeAnnotation(Annotation *ptr)
 
     emit annotationCountChanged();
 
-    GarbageCollector::instance()->add(ptr);
+    if(ptr->parent() == this)
+        GarbageCollector::instance()->add(ptr);
 }
 
 Annotation *Structure::annotationAt(int index) const
@@ -1356,6 +1998,58 @@ void Structure::paste(const QPointF &pos)
         // happen relative to the newly pasted element
         this->copy(element);
         return;
+    }
+}
+
+void Structure::setCharacterRelationshipGraph(const QJsonObject &val)
+{
+    if(m_characterRelationshipGraph == val)
+        return;
+
+    m_characterRelationshipGraph = val;
+    emit characterRelationshipGraphChanged();
+}
+
+void Structure::serializeToJson(QJsonObject &) const
+{
+    // Do nothing
+}
+
+void Structure::deserializeFromJson(const QJsonObject &)
+{
+    Q_FOREACH(Character *character, m_characters.list())
+        character->resolveRelationships();
+
+    // Forward and reverse relationships must be a tuple. If one is deleted, the other must
+    // get deleted right away. We cannot afford to have zombie relationships.
+    Q_FOREACH(Character *character, m_characters.list())
+    {
+        for(int i=0; i<character->relationshipCount(); i++)
+        {
+            Relationship *ofWith = character->relationshipAt(i);
+            if(ofWith->direction() == Relationship::OfWith)
+            {
+                Relationship *withOf = ofWith->with()->findRelationship(character);
+                if(withOf == nullptr)
+                {
+                    ofWith->deleteLater();
+                    continue;
+                }
+
+                if(withOf->direction() == Relationship::WithOf)
+                {
+                    // Ensure that if one of the relationships is destroyed, the other
+                    // must destroy itself.
+                    connect(withOf, &Relationship::aboutToDelete, ofWith, &Relationship::deleteLater);
+                    connect(ofWith, &Relationship::aboutToDelete, withOf, &Relationship::deleteLater);
+                }
+                else
+                {
+                    ofWith->deleteLater();
+                    withOf->deleteLater();
+                }
+            }
+        }
     }
 }
 

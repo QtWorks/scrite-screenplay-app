@@ -27,6 +27,9 @@
 #include <QPageLayout>
 #include <QFontDatabase>
 #include <QTextBlockUserData>
+#include <QClipboard>
+#include <QMimeData>
+#include <QJsonDocument>
 
 static const int IsWordMisspelledProperty = QTextCharFormat::UserProperty+100;
 static const int WordSuggestionsProperty = IsWordMisspelledProperty+1;
@@ -707,7 +710,7 @@ void ScreenplayFormat::resetToDefaults()
       Character      | 3.70"       | 7.36"        | 1 Line
       Parenthetical  | 3.10"       | 5.63"        | 0 Lines
       Dialogue       | 2.50"       | 6.55"        | 0 Lines
-      Transition     | 5.60"       | 7.6"         | 1 Lines
+      Transition     | 4.78"       | 8.05"        | 1 Lines
       Shot           | 1.50"       | 7.6"         | 1 Lines
       */
 
@@ -759,10 +762,11 @@ void ScreenplayFormat::resetToDefaults()
     m_elementFormats[SceneElement::Dialogue]->setRightMargin( (right-6.55)/contentWidth );
     m_elementFormats[SceneElement::Dialogue]->setLineSpacingBefore(0);
 
-    m_elementFormats[SceneElement::Transition]->setLeftMargin( (5.6-left)/contentWidth );
-    m_elementFormats[SceneElement::Transition]->setRightMargin( (right-7.6)/contentWidth );
+    m_elementFormats[SceneElement::Transition]->setLeftMargin( (4.78-left)/contentWidth );
+    m_elementFormats[SceneElement::Transition]->setRightMargin( (right-8.05)/contentWidth );
     m_elementFormats[SceneElement::Transition]->setLineSpacingBefore(1);
     m_elementFormats[SceneElement::Transition]->setFontCapitalization(QFont::AllUppercase);
+    m_elementFormats[SceneElement::Transition]->setTextAlignment(Qt::AlignRight);
 
     m_elementFormats[SceneElement::Shot]->setLeftMargin( (1.5-left)/contentWidth );
     m_elementFormats[SceneElement::Shot]->setRightMargin( (right-7.6)/contentWidth );
@@ -1539,6 +1543,100 @@ QFont SceneDocumentBinder::currentFont() const
 
     QTextCharFormat format = cursor.charFormat();
     return format.font();
+}
+
+void SceneDocumentBinder::copy(int fromPosition, int toPosition)
+{
+    if(this->document() == nullptr)
+        return;
+
+    QJsonArray content;
+
+    QTextCursor cursor(this->document());
+    cursor.setPosition(fromPosition);
+
+    QStringList lines;
+
+    QTextBlock block = cursor.block();
+    while(block.isValid() && toPosition > block.position())
+    {
+        SceneDocumentBlockUserData *userData = SceneDocumentBlockUserData::get(block);
+        if(userData == nullptr)
+        {
+            block = block.next();
+            continue;
+        }
+
+        const int bstart = block.position();
+        const int bend = block.position() + block.length() - 1;
+        cursor.setPosition( qMax(fromPosition, bstart) );
+        cursor.setPosition( qMin(toPosition, bend), QTextCursor::KeepAnchor );
+
+        SceneElement *element = userData->sceneElement();
+
+        QJsonObject para;
+        para.insert(QStringLiteral("type"), element->type());
+        para.insert(QStringLiteral("text"), cursor.selectedText());
+        content.append(para);
+
+        lines += cursor.selectedText();
+
+        block = block.next();
+    }
+
+    const QByteArray contentJson = QJsonDocument(content).toJson();
+
+    QClipboard *clipboard = Application::instance()->clipboard();
+    QMimeData *mimeData = new QMimeData;
+    mimeData->setData(QStringLiteral("scrite/screenplay"), contentJson);
+    mimeData->setText(lines.join("\n"));
+    clipboard->setMimeData(mimeData);
+}
+
+bool SceneDocumentBinder::paste(int fromPosition)
+{
+    if(this->document() == nullptr)
+        return false;
+
+    const QClipboard *clipboard = Application::instance()->clipboard();
+    const QMimeData *mimeData = clipboard->mimeData();
+    const QByteArray contentJson = mimeData->data(QStringLiteral("scrite/screenplay"));
+    if(contentJson.isEmpty())
+        return false;
+
+    const QJsonArray content = QJsonDocument::fromJson(contentJson).array();
+    if(content.isEmpty())
+        return false;
+
+    fromPosition = fromPosition >= 0 ? fromPosition : m_cursorPosition;
+
+    QTextCursor cursor(this->document());
+    cursor.setPosition(fromPosition >= 0 ? fromPosition : m_cursorPosition);
+
+    const bool pasteFormatting = content.size() > 1;
+
+    for(int i=0; i<content.size(); i++)
+    {
+        const QJsonObject item = content.at(i).toObject();
+        const int type = item.value( QStringLiteral("type") ).toInt();
+        if(type < SceneElement::Min || type > SceneElement::Max || type == SceneElement::Heading)
+            continue;
+
+        if(i > 0)
+            cursor.insertBlock();
+
+        const QString text = item.value( QStringLiteral("text") ).toString();
+        cursor.insertText(text);
+
+        if(pasteFormatting)
+        {
+            SceneDocumentBlockUserData *userData = SceneDocumentBlockUserData::get(cursor.block());
+            if(userData)
+                userData->sceneElement()->setType( SceneElement::Type(type) );
+        }
+    }
+
+    return true;
 }
 
 void SceneDocumentBinder::classBegin()

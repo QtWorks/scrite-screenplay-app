@@ -28,9 +28,11 @@
 #include "completer.h"
 #include "ruleritem.h"
 #include "autoupdate.h"
+#include "automation.h"
 #include "trackobject.h"
 #include "aggregation.h"
 #include "eventfilter.h"
+#include "announcement.h"
 #include "imageprinter.h"
 #include "focustracker.h"
 #include "notification.h"
@@ -47,15 +49,18 @@
 #include "openfromlibrary.h"
 #include "abstractexporter.h"
 #include "tightboundingbox.h"
+#include "notebooktabmodel.h"
 #include "genericarraymodel.h"
 #include "screenplayadapter.h"
 #include "spellcheckservice.h"
+#include "tabsequencemanager.h"
 #include "gridbackgrounditem.h"
 #include "notificationmanager.h"
 #include "delayedpropertybinder.h"
 #include "screenplaytextdocument.h"
 #include "abstractreportgenerator.h"
 #include "qtextdocumentpagedprinter.h"
+#include "characterrelationshipsgraph.h"
 
 void ScriteQtMessageHandler(QtMsgType type, const QMessageLogContext & context, const QString &message)
 {
@@ -91,7 +96,7 @@ void ScriteQtMessageHandler(QtMsgType type, const QMessageLogContext & context, 
 
 int main(int argc, char **argv)
 {
-    const QVersionNumber applicationVersion(0, 4, 18);
+    const QVersionNumber applicationVersion(0, 5, 2);
     Application::setApplicationName("Scrite");
     Application::setOrganizationName("TERIFLIX");
     Application::setOrganizationDomain("teriflix.com");
@@ -146,7 +151,9 @@ int main(int argc, char **argv)
     qmlRegisterType<StructureElementConnector>("Scrite", 1, 0, "StructureElementConnector");
 
     qmlRegisterType<Note>("Scrite", 1, 0, "Note");
+    qmlRegisterType<Relationship>("Scrite", 1, 0, "Relationship");
     qmlRegisterUncreatableType<Character>("Scrite", 1, 0, "Character", reason);
+    qmlRegisterType<CharacterRelationshipsGraph>("Scrite", 1, 0, "CharacterRelationshipsGraph");
 
     qmlRegisterUncreatableType<ScriteDocument>("Scrite", 1, 0, "ScriteDocument", reason);
     qmlRegisterUncreatableType<ScreenplayFormat>("Scrite", 1, 0, "ScreenplayFormat", reason);
@@ -237,6 +244,15 @@ int main(int argc, char **argv)
 
     qmlRegisterType<UrlAttributes>("Scrite", 1, 0, "UrlAttributes");
 
+    qmlRegisterUncreatableType<QAbstractItemModel>("Scrite", 1, 0, "Model", "Base type of models (QAbstractItemModel)");
+
+    qmlRegisterType<TabSequenceManager>("Scrite", 1, 0, "TabSequenceManager");
+    qmlRegisterUncreatableType<TabSequenceItem>("Scrite", 1, 0, "TabSequenceItem", "Use as attached property.");
+
+    qmlRegisterUncreatableType<Announcement>("Scrite", 1, 0, "Announcement", "Use as attached property.");
+
+    qmlRegisterType<NotebookTabModel>("Scrite", 1, 0, "NotebookTabModel");
+
     NotificationManager notificationManager;
 
     DocumentFileSystem::setMarker( QByteArrayLiteral("SCRITE") );
@@ -269,6 +285,7 @@ int main(int argc, char **argv)
     QQuickStyle::setStyle("Material");
 
     QQuickView qmlView;
+    qmlView.setObjectName(QStringLiteral("ScriteQmlWindow"));
     qmlView.setFormat(format);
 #ifdef Q_OS_WIN
     if( QOperatingSystemVersion::current() >= QOperatingSystemVersion::Windows10 )
@@ -287,9 +304,30 @@ int main(int argc, char **argv)
     qmlView.engine()->rootContext()->setContextProperty("shortcutsModel", ShortcutsModel::instance());
     qmlView.engine()->rootContext()->setContextProperty("notificationManager", &notificationManager);
     qmlView.setResizeMode(QQuickView::SizeRootObjectToView);
+    Automation::init(&qmlView);
     qmlView.setSource(QUrl("qrc:/main.qml"));
     qmlView.setMinimumSize(QSize(qMin(600,primaryScreenSize.width()), qMin(375,primaryScreenSize.height())));
-    qmlView.showMaximized();
+
+#if 0
+    const QByteArray windowSize = qgetenv("SCRITE_WINDOW_SIZE");
+    if(windowSize.isEmpty())
+        qmlView.showMaximized();
+    else
+    {
+        QTextStream ts(windowSize);
+        int width = 0, height = 0;
+        ts >> width >> height;
+        if(width == 0 || height == 0)
+            qmlView.showFullScreen();
+        else
+        {
+            qmlView.resize(width, height);
+            qmlView.show();
+        }
+    }
+#else
+    qmlView.show();
+#endif
     qmlView.raise();
 
 #ifdef Q_OS_MAC
@@ -317,3 +355,4 @@ int main(int argc, char **argv)
 
     return a.exec();
 }
+

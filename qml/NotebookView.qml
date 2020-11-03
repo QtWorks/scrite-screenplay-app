@@ -12,7 +12,9 @@
 ****************************************************************************/
 
 import QtQuick 2.13
+import Qt.labs.settings 1.0
 import QtQuick.Controls 2.13
+
 import Scrite 1.0
 
 Item {
@@ -23,11 +25,56 @@ Item {
         smooth: true
     }
 
+    NotebookTabModel {
+        id: noteSources
+        structure: scriteDocument.loading ? null : scriteDocument.structure
+        activeScene: {
+            if(scriteDocument.screenplay.activeScene)
+                return scriteDocument.screenplay.activeScene
+            var idx = scriteDocument.structure.currentElementIndex
+            if(idx >= 0) {
+                var se = scriteDocument.structure.elementAt(idx)
+                if(se.scene)
+                    return se.scene
+            }
+            return null
+        }
+
+        property int currentIndex: notebookTabsView.currentIndex
+        onCurrentIndexChanged: fetchCurrents()
+        onRefreshed: fetchCurrents()
+
+        function fetchCurrents() {
+            currentSource = sourceAt(currentIndex)
+            currentColor = colorAt(currentIndex)
+            currentLabel = labelAt(currentIndex)
+        }
+
+        property var currentSource
+        property color currentColor: "white"
+        property string currentLabel: "none"
+    }
+
+    function switchToStoryTab() {
+        notebookTabsView.currentIndex = 0
+    }
+
+    function switchToSceneTab(scene) {
+        // if(noteSources.activeScene === scene)
+        notebookTabsView.currentIndex = 1
+    }
+
+    function switchToCharacterTab(name) {
+        var idx = noteSources.indexOfLabel(name);
+        if(idx >= 0)
+            notebookTabsView.currentIndex = idx
+    }
+
     ListView {
         id: notebookTabsView
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.bottom: parent.bottom
+        anchors.bottom: tabScrollButtons.top
         anchors.rightMargin: 3
         anchors.topMargin: 8
         anchors.bottomMargin: 8
@@ -36,9 +83,10 @@ Item {
         model: noteSources
         spacing: -width*0.4
         currentIndex: 0
+        highlightMoveDuration: 0
         footer: Item {
             width: notebookTabsView.width
-            height: width
+            height: width * 1.5
 
             RoundButton {
                 anchors.centerIn: parent
@@ -89,37 +137,35 @@ Item {
         }
     }
 
-    property var noteSources: []
-    function evaluateNoteSources() {
-        var currentIndex = notebookTabsView.currentIndex
-        notebookTabsView.currentIndex = -1
+    Column {
+        id: tabScrollButtons
+        width: notebookTabsView.width
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        spacing: -10
 
-        var sources = []
-        sources.push( {"source": scriteDocument.structure, "label": "Story", "color": "purple" })
-
-        var activeScene = scriteDocument.screenplay.activeScene
-        if(activeScene)
-            sources.push({"source": activeScene, "label": activeScene.title, "color": activeScene.color})
-
-        var nrCharacters = scriteDocument.structure.characterCount
-        for(var i=0; i<nrCharacters; i++) {
-            var character = scriteDocument.structure.characterAt(i)
-            sources.push({"source": character, "label":character.name, "color": app.pickStandardColor(i)})
+        ToolButton {
+            icon.source: "../icons/navigation/keyboard_arrow_up.png"
+            width: parent.width
+            enabled: notebookTabsView.currentIndex > 0
+            onClicked: notebookTabsView.currentIndex = Math.max(0, notebookTabsView.currentIndex-1)
+            ToolTip.text: "Click to switch to the previous tab"
+            ToolTip.visible: hovered
+            ToolTip.delay: 1000
+            hoverEnabled: true
         }
 
-        noteSources = sources
-        notebookTabsView.currentIndex = currentIndex
+        ToolButton {
+            icon.source: "../icons/navigation/keyboard_arrow_down.png"
+            width: parent.width
+            enabled: notebookTabsView.currentIndex < notebookTabsView.count-1
+            onClicked: notebookTabsView.currentIndex = Math.min(notebookTabsView.count-1, notebookTabsView.currentIndex+1)
+            ToolTip.text: "Click to switch to the next tab"
+            ToolTip.visible: hovered
+            ToolTip.delay: 1000
+            hoverEnabled: true
+        }
     }
-
-    Connections {
-        target: scriteDocument.structure
-        onCharacterCountChanged: evaluateNoteSources()
-    }
-    Connections {
-        target: scriteDocument.screenplay
-        onActiveSceneChanged: evaluateNoteSources()
-    }
-    Component.onCompleted: evaluateNoteSources()
 
     Menu2 {
         id: characterItemMenu
@@ -135,294 +181,84 @@ Item {
         }
     }
 
-    property var notesPack: notebookTabsView.currentIndex >= 0 ? noteSources[notebookTabsView.currentIndex].source : scriteDocument.structure
+    property color currentTabNoteColor: !scriteDocument.loading && notebookTabsView.currentIndex >= 0 ? noteSources.currentColor : "black"
+    property var currentTabNotesSource: !scriteDocument.loading && notebookTabsView.currentIndex >= 0 ? noteSources.currentSource : scriteDocument.structure
 
     Rectangle {
-        anchors.left: notesGrid.left
-        anchors.top: notesGrid.top
-        anchors.bottom: notesGrid.bottom
-        anchors.right: notebookTabsView.left
-        anchors.leftMargin: -2
-        anchors.topMargin: -2
-        anchors.bottomMargin: -2
-        anchors.rightMargin: -1
-        color: app.translucent(border.color, 0.04)
-        radius: 4
-        border.width: 2
-        border.color: notebookTabsView.currentIndex >= 0 ? noteSources[notebookTabsView.currentIndex].color : "black"
-    }
-
-    GridView {
-        id: notesGrid
-        width: notesGrid.width
         anchors.left: parent.left
         anchors.right: notebookTabsView.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.margins: 5
-        clip: true
-        ScrollBar.vertical: ScrollBar {
-            policy: ScrollBar.AlwaysOn
-            opacity: active ? 1 : 0.2
-            Behavior on opacity {
-                enabled: screenplayEditorSettings.enableAnimations
-                NumberAnimation { duration: 250 }
-            }
-        }
+        anchors.leftMargin: 3
+        anchors.topMargin: 3
+        anchors.bottomMargin: 3
+        anchors.rightMargin: -1
+        color: app.translucent(border.color, 0.04)
+        radius: 4
+        border.width: 2
+        border.color: currentTabNoteColor
 
-        property real minimumCellWidth: 450
-        property int nrCells: Math.floor(width/minimumCellWidth)
-
-        cellWidth: width/nrCells
-        cellHeight: 500
-
-        model: notesPack ? notesPack.noteCount+1 : 0
-
-        delegate: Item {
-            width: notesGrid.cellWidth
-            height: notesGrid.cellHeight
-
-            Loader {
-                anchors.fill: parent
-                anchors.rightMargin: ((index+1)%notesGrid.nrCells)===0 ? 20 : 5
-                property int noteIndex: index < notesPack.noteCount ? index : -1
-                sourceComponent: noteIndex >= 0 ? noteDelegate : newNoteDelegate
-                active: true
-            }
-        }
-    }
-
-    Loader {
-        anchors.left: notesGrid.left
-        anchors.right: notesGrid.right
-        anchors.bottom: notesGrid.bottom
-        anchors.top: notesGrid.verticalCenter
-        active: notesPack ? notesPack.noteCount === 0 : false
-        sourceComponent: Item {
-            Text {
-                anchors.fill: parent
-                anchors.margins: 30
-                font.pixelSize: 30
-                font.letterSpacing: 1
-                wrapMode: Text.WordWrap
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-                lineHeight: 1.2
-                text: {
-                    if(notebookTabsView.currentIndex > 0)
-                        return "You can capture your thoughts, ideas and research related to '<b>" + notesPack.name + "</b>' here.";
-                    return "You can capture your thoughts, ideas and research about your screenplay here.";
-                }
+        Loader {
+            anchors.fill: parent
+            anchors.margins: 2
+            active: !scriteDocument.loading
+            sourceComponent: {
+                if( app.verifyType(currentTabNotesSource, "Character") )
+                    return characterNotesComponent
+                return notesViewComponent
             }
         }
     }
 
     Component {
-        id: noteDelegate
+        id: characterNotesComponent
 
-        Item {
-            id: noteItem
-            property Note note: notesPack.noteAt(noteIndex)
-
-            Loader {
-                anchors.fill: parent
-                anchors.margins: 10
-                active: parent.note !== null
-                sourceComponent: Item {
-                    Rectangle {
-                        anchors.fill: parent
-                        color: Qt.tint(note.color, "#C0FFFFFF")
-                        border.width: 2
-                        border.color: (note.color === Qt.rgba(1,1,1,1)) ? "black" : note.color
-                        radius: 5
-                        Behavior on color {
-                            enabled: screenplayEditorSettings.enableAnimations
-                            ColorAnimation { duration: 500 }
-                        }
-                    }
-
-                    ScrollView {
-                        id: noteScrollView
-                        anchors.fill: parent
-                        anchors.margins: 5
-                        clip: true
-
-                        Column {
-                            width: noteScrollView.width
-                            spacing: 10
-
-                            Rectangle {
-                                id: noteTitleBar
-                                width: parent.width
-                                height: noteTitleBarLayout.height+8
-                                color: notesGrid.currentIndex === noteIndex ? Qt.rgba(0,0,0,0.25) : Qt.rgba(0,0,0,0)
-                                radius: 5
-
-                                Row {
-                                    id: noteTitleBarLayout
-                                    spacing: 5
-                                    width: parent.width-4
-                                    anchors.centerIn: parent
-
-                                    TextArea {
-                                        id: headingEdit
-                                        width: parent.width-menuButton.width-deleteButton.width-2*parent.spacing
-                                        wrapMode: Text.WordWrap
-                                        text: note.heading
-                                        font.bold: true
-                                        font.pixelSize: 20
-                                        background: Item { }
-                                        leftPadding: 10
-                                        rightPadding: 10
-                                        // renderType: Text.NativeRendering
-                                        selectByMouse: true
-                                        selectByKeyboard: true
-                                        onTextChanged: {
-                                            if(activeFocus)
-                                                note.heading = text
-                                        }
-                                        readOnly: scriteDocument.readOnly
-                                        palette: app.palette
-                                        Keys.onReturnPressed: editingFinished()
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        KeyNavigation.tab: contentEdit
-                                        Transliterator.textDocument: textDocument
-                                        Transliterator.cursorPosition: cursorPosition
-                                        Transliterator.hasActiveFocus: activeFocus
-
-                                        SpecialSymbolsSupport {
-                                            anchors.top: parent.bottom
-                                            anchors.left: parent.left
-                                            textEditor: headingEdit
-                                            textEditorHasCursorInterface: true
-                                        }
-                                    }
-
-                                    ToolButton3 {
-                                        id: menuButton
-                                        iconSource: "../icons/navigation/menu.png"
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        down: noteMenuLoader.item.visible
-                                        enabled: !scriteDocument.readOnly
-                                        onClicked: {
-                                            if(noteMenuLoader.item.visible)
-                                                noteMenuLoader.item.close()
-                                            else
-                                                noteMenuLoader.item.open()
-                                        }
-
-                                        Loader {
-                                            id: noteMenuLoader
-                                            width: parent.width; height: 1
-                                            anchors.top: parent.bottom
-                                            sourceComponent: ColorMenu { }
-                                            active: true
-
-                                            Connections {
-                                                target: noteMenuLoader.item
-                                                onMenuItemClicked: note.color = color
-                                            }
-                                        }
-                                    }
-
-                                    ToolButton3 {
-                                        id: deleteButton
-                                        iconSource: "../icons/action/delete.png"
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        onClicked: notesPack.removeNote(note)
-                                        enabled: !scriteDocument.readOnly
-                                    }
-                                }
-                            }
-
-                            TextArea {
-                                id: contentEdit
-                                width: parent.width
-                                wrapMode: Text.WordWrap
-                                text: note.content
-                                textFormat: TextArea.PlainText
-                                background: Item { }
-                                leftPadding: 10
-                                rightPadding: 10
-                                // renderType: Text.NativeRendering
-                                font.pixelSize: 18
-                                onTextChanged: {
-                                    if(activeFocus)
-                                        note.content = text
-                                }
-                                readOnly: scriteDocument.readOnly
-                                palette: app.palette
-                                selectByMouse: true
-                                selectByKeyboard: true
-                                placeholderText: "type the contents of your note here.."
-                                KeyNavigation.tab: headingEdit
-                                Transliterator.textDocument: textDocument
-                                Transliterator.cursorPosition: cursorPosition
-                                Transliterator.hasActiveFocus: activeFocus
-
-                                SpecialSymbolsSupport {
-                                    anchors.top: parent.bottom
-                                    anchors.left: parent.left
-                                    textEditor: contentEdit
-                                    textEditorHasCursorInterface: true
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                enabled: notesGrid.currentIndex !== noteIndex
-                onClicked: notesGrid.currentIndex = noteIndex
-            }
+        CharacterNotes {
+            character: currentTabNotesSource
+            colorHint: currentTabNoteColor
+            showCharacterInfoInNotesTab: workspaceSettings.showNotebookInStructure
+            onCharacterDoubleClicked: switchToCharacterTab(characterName)
         }
     }
 
     Component {
-        id: newNoteDelegate
+        id: notesViewComponent
 
         Item {
-            visible: !scriteDocument.readOnly
-            enabled: !scriteDocument.readOnly
-
-            Rectangle {
+            TabView3 {
+                id: notesTabView
                 anchors.fill: parent
-                anchors.margins: 10
-                radius: 5
-                color: primaryColors.windowColor
-                opacity: 0.25
-            }
+                anchors.margins: 2
+                tabNames: ["Relationships", "(" + currentTabNotesSource.noteCount + ") Notes"]
+                currentTabIndex: notebookSettings.activeTab
+                onCurrentTabIndexChanged: notebookSettings.activeTab = currentTabIndex
+                tabColor: currentTabNoteColor
+                currentTabContent: Item {
+                    CharacterRelationshipsGraphView {
+                        anchors.fill: parent
+                        anchors.margins: 2
+                        visible: notesTabView.currentTabIndex === 0
+                        z: visible ? 1 : 0
+                        scene: app.verifyType(currentTabNotesSource, "Scene") ? currentTabNotesSource : null
+                        onCharacterDoubleClicked: switchToCharacterTab(characterName)
+                    }
 
-            RoundButton {
-                width: 80; height: 80
-                anchors.centerIn: parent
-                icon.width: 48
-                icon.height: 48
-                icon.source: "../icons/action/note_add.png"
-                down: noteMenuLoader.item.visible
-                onClicked: {
-                    if(noteMenuLoader.item.visible)
-                        noteMenuLoader.item.close()
-                    else
-                        noteMenuLoader.item.open()
-                }
-
-                Loader {
-                    id: noteMenuLoader
-                    width: parent.width; height: 1
-                    anchors.top: parent.bottom
-                    sourceComponent: ColorMenu { }
-                    active: true
-
-                    Connections {
-                        target: noteMenuLoader.item
-                        onMenuItemClicked: {
-                            var props = {"color": color}
-                            var note = noteComponent.createObject(scriteDocument.structure, props)
-                            notesPack.addNote(note)
-                            notesGrid.currentIndex = notesPack.noteCount-1
+                    NotesView {
+                        anchors.fill: parent
+                        anchors.margins: 2
+                        visible: notesTabView.currentTabIndex === 1
+                        z: visible ? 1 : 0
+                        notesModel: scriteDocument.loading ? null : (currentTabNotesSource ? currentTabNotesSource.notesModel : null)
+                        onNewNoteRequest: {
+                            var note = noteComponent.createObject(currentTabNotesSource)
+                            note.color = noteColor
+                            currentTabNotesSource.addNote(note)
+                        }
+                        onRemoveNoteRequest: currentTabNotesSource.removeNote(currentTabNotesSource.noteAt(index))
+                        title: {
+                            if(notebookTabsView.currentTabIndex > 0)
+                                return "You can capture your thoughts, ideas and research related to '<b>" + currentTabNotesSource.name + "</b>' here.";
+                            return "You can capture your thoughts, ideas and research about your screenplay here.";
                         }
                     }
                 }
@@ -435,6 +271,13 @@ Item {
 
         Note {
             heading: "Note Heading"
+            Component.onCompleted: {
+                var lastNote = currentTabNotesSource.notesModel.objectAt(currentTabNotesSource.notesModel.objectCount-1)
+                if(lastNote)
+                    color = lastNote.color
+                else
+                    color = "white"
+            }
         }
     }
 
@@ -448,7 +291,7 @@ Item {
 
             Item {
                 anchors.fill: parent
-                anchors.margins: 10
+                anchors.margins: 20
 
                 Text {
                     id: title
@@ -456,7 +299,7 @@ Item {
                     anchors.top: parent.top
                     font.pixelSize: 18
                     horizontalAlignment: Text.AlignHCenter
-                    text: "Check the characters for which you want to create sections in the notebook"
+                    text: "Check the characters for which you want to create sections in the notebook."
                     wrapMode: Text.WordWrap
                 }
 

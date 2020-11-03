@@ -42,6 +42,7 @@ static QStringList getCustomFontFilePaths()
          QStringLiteral(":/font/Punjabi/BalooPaaji2-Bold.ttf") <<
          QStringLiteral(":/font/Malayalam/BalooChettan2-Regular.ttf") <<
          QStringLiteral(":/font/Malayalam/BalooChettan2-Bold.ttf") <<
+         QStringLiteral(":/font/Marathi/Shusha-Normal.ttf") <<
          QStringLiteral(":/font/Hindi/Mukta-Regular.ttf") <<
          QStringLiteral(":/font/Hindi/Mukta-Bold.ttf") <<
          QStringLiteral(":/font/Telugu/HindGuntur-Regular.ttf") <<
@@ -182,7 +183,9 @@ QString TransliterationEngine::languageAsString(TransliterationEngine::Language 
 QString TransliterationEngine::shortcutLetter(TransliterationEngine::Language val) const
 {
     if(val == Tamil)
-        return QString("L");
+        return QStringLiteral("L");
+    if(val == Marathi)
+        return QStringLiteral("R");
 
     const QMetaObject *mo = this->metaObject();
     const QMetaEnum metaEnum = mo->enumerator( mo->indexOfEnumerator("Language") );
@@ -217,7 +220,12 @@ public:
         if(item == nullptr)
             return ret;
         ret.insert("latin", QString::fromLatin1(item->phRep));
-        ret.insert("unicode", QString::fromWCharArray(&(item->uCode), 1));
+        if(sizeof(T) == sizeof(PhTranslation::VowelDef)) {
+            const PhTranslation::VowelDef *vitem = reinterpret_cast<const PhTranslation::VowelDef*>(item);
+            ret.insert("unicode", QString::fromWCharArray(&(vitem->uCode), 1) + QStringLiteral(", ") +
+                                  QString::fromWCharArray(&(vitem->dCode), 1));
+        } else
+            ret.insert("unicode", QString::fromWCharArray(&(item->uCode), 1));
         return ret;
     }
 
@@ -273,6 +281,9 @@ QJsonObject TransliterationEngine::alphabetMappingsFor(TransliterationEngine::La
         break;
     case Malayalam:
         LOAD_ARRAYS(Malayalam)
+        break;
+    case Marathi:
+        LOAD_ARRAYS(Hindi)
         break;
     case Oriya:
         LOAD_ARRAYS(Oriya)
@@ -401,6 +412,8 @@ void *TransliterationEngine::transliteratorFor(TransliterationEngine::Language l
         return GetKannadaTranslator();
     case Malayalam:
         return GetMalayalamTranslator();
+    case Marathi:
+        return GetMarathiTranslator();
     case Oriya:
         return GetOriyaTranslator();
     case Punjabi:
@@ -516,6 +529,14 @@ QString TransliterationEngine::transliteratedParagraph(const QString &paragraph,
     if(wordPositions.isEmpty())
         return paragraph;
 
+    if(!includingLastWord)
+    {
+        const QChar lastCharacter = paragraph.at(paragraph.length()-1);
+        const bool endsWithSpaceOrPunctuation = lastCharacter.isSpace() || lastCharacter.isPunct() || lastCharacter.isDigit();
+        if(endsWithSpaceOrPunctuation)
+            includingLastWord = true;
+    }
+
     QString ret;
     Sonnet::TextBreaks::Position wordPosition;
     for(int i=0; i<wordPositions.size(); i++)
@@ -577,6 +598,16 @@ QJsonObject TransliterationEngine::availableLanguageFontFamilies(Transliteration
                       std::back_inserter(filteredLanguageFontFamilies), [fontDb,language](const QString &family) {
             return fontDb.isPrivateFamily(family) ? false : (language == TransliterationEngine::English ? fontDb.isFixedPitch(family) : true);
         });
+
+        const int builtInFontId = m_languageBundledFontId.value(language);
+        if(builtInFontId >= 0)
+        {
+            const QString builtInFont = QFontDatabase::applicationFontFamilies(builtInFontId).first();
+            filteredLanguageFontFamilies.removeOne(builtInFont);
+            filteredLanguageFontFamilies.append(builtInFont);
+            std::sort(filteredLanguageFontFamilies.begin(), filteredLanguageFontFamilies.end());
+        }
+
         m_availableLanguageFontFamilies[language] = filteredLanguageFontFamilies;
     }
 
@@ -595,11 +626,10 @@ void TransliterationEngine::setPreferredFontFamilyForLanguage(TransliterationEng
 {
     const QString before = m_languageFontFamily.value(language);
 
-    if(fontFamily.isEmpty())
-    {
-        const int id = m_languageBundledFontId.value(language);
-        m_languageFontFamily[language] = id < 0 ? QString() : QFontDatabase::applicationFontFamilies(id).first();
-    }
+    const int builtInFontId = m_languageBundledFontId.value(language);
+    const QString builtInFontFamily = builtInFontId < 0 ? QString() : QFontDatabase::applicationFontFamilies(builtInFontId).first();
+    if(fontFamily.isEmpty() || (!fontFamily.isEmpty() && !builtInFontFamily.isEmpty() && fontFamily == builtInFontFamily))
+        m_languageFontFamily[language] = builtInFontFamily;
     else
     {
         const QFontDatabase fontDb;
@@ -644,6 +674,8 @@ QChar::Script TransliterationEngine::scriptForLanguage(Language language)
     {
         languageScriptMap[English] = QChar::Script_Latin;
         languageScriptMap[Hindi] = QChar::Script_Devanagari;
+        languageScriptMap[Marathi] = QChar::Script_Devanagari;
+        languageScriptMap[Sanskrit] = QChar::Script_Devanagari;
         languageScriptMap[Bengali] = QChar::Script_Bengali;
         languageScriptMap[Punjabi] = QChar::Script_Gurmukhi;
         languageScriptMap[Gujarati] = QChar::Script_Gujarati;
@@ -668,6 +700,7 @@ QFontDatabase::WritingSystem TransliterationEngine::writingSystemForLanguage(Tra
         languageWritingSystemMap[Hindi] = QFontDatabase::Devanagari;
         languageWritingSystemMap[Kannada] = QFontDatabase::Kannada;
         languageWritingSystemMap[Malayalam] = QFontDatabase::Malayalam;
+        languageWritingSystemMap[Marathi] = QFontDatabase::Devanagari;
         languageWritingSystemMap[Oriya] = QFontDatabase::Oriya;
         languageWritingSystemMap[Punjabi] = QFontDatabase::Gurmukhi;
         languageWritingSystemMap[Sanskrit] = QFontDatabase::Devanagari;
@@ -981,7 +1014,7 @@ void Transliterator::resetTextDocument()
 void Transliterator::processTransliteration(int from, int charsRemoved, int charsAdded)
 {
     Q_UNUSED(charsRemoved)
-    if(this->document() == nullptr || !m_hasActiveFocus || !m_enabled)
+    if(this->document() == nullptr || !m_hasActiveFocus || !m_enabled || charsAdded == 0)
         return;
 
     if(m_enableFromNextWord == true)
@@ -999,6 +1032,8 @@ void Transliterator::processTransliteration(int from, int charsRemoved, int char
     cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor, charsAdded);
 
     const QString original = cursor.selectedText();
+    if(original.isEmpty())
+        return;
 
     if(charsAdded == 1)
     {

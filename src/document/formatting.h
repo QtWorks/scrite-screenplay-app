@@ -108,6 +108,7 @@ public:
         Hindi,
         Kannada,
         Malayalam,
+        Marathi,
         Oriya,
         Punjabi,
         Sanskrit,
@@ -495,6 +496,9 @@ public:
     Q_SIGNAL void documentLoadCountChanged();
 
     Q_SIGNAL void documentInitialized();
+
+    Q_INVOKABLE void copy(int fromPosition, int toPosition);
+    Q_INVOKABLE bool paste(int fromPosition=-1);
 
     // QQmlParserStatus interface
     void classBegin();

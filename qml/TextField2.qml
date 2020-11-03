@@ -20,6 +20,8 @@ TextField {
     property alias completionStrings: completer.strings
     property Item tabItem
     property Item backTabItem
+    property bool labelAlwaysVisible: false
+    property alias label: labelText.text
     property bool enableTransliteration: false
     property bool includeEmojiSymbols: true
     property alias showingSymbols: specialSymbolSupport.showingSymbols
@@ -28,6 +30,7 @@ TextField {
     selectByMouse: true
 
     signal editingComplete()
+    signal returnPressed()
 
     onEditingFinished: {
         transliterate(true)
@@ -67,7 +70,15 @@ TextField {
             userTypedSomeText = true
     }
 
-    Keys.onReturnPressed: autoCompleteOrFocusNext()
+    Keys.onReturnPressed: {
+        autoCompleteOrFocusNext()
+        returnPressed()
+    }
+    Keys.onEnterPressed: {
+        autoCompleteOrFocusNext()
+        returnPressed()
+    }
+
     Keys.onTabPressed: autoCompleteOrFocusNext()
 
     function autoCompleteOrFocusNext() {
@@ -77,7 +88,8 @@ TextField {
         } else if(tabItem) {
             editingFinished()
             tabItem.forceActiveFocus()
-        }
+        } else
+            editingFinished()
     }
 
     KeyNavigation.tab: tabItem
@@ -102,5 +114,14 @@ TextField {
         textEditor: textField
         includeEmojis: parent.includeEmojiSymbols
         textEditorHasCursorInterface: true
+    }
+
+    Text {
+        id: labelText
+        text: parent.placeholderText
+        font.pointSize: app.idealFontPointSize/2
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.top
+        visible: parent.labelAlwaysVisible ? true : parent.text !== ""
     }
 }

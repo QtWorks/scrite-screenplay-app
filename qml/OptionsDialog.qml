@@ -57,13 +57,14 @@ Item {
         id: applicationSettingsComponent
 
         PageView {
-            pagesArray: ["Settings", "Fonts", "Transliteration", "Additional"]
+            pagesArray: ["Settings", "Fonts", "Transliteration", "Rel. Graph", "Additional"]
             currentIndex: 0
             pageContent: {
                 switch(currentIndex) {
                 case 1: return fontSettingsComponent
                 case 2: return transliterationSettingsComponent
-                case 3: return additionalSettingsComponent
+                case 3: return relationshipGraphSettingsComponent
+                case 4: return additionalSettingsComponent
                 }
                 return coreSettingsComponent
             }
@@ -173,6 +174,7 @@ Item {
                 "हिन्दी",
                 "ಕನ್ನಡ",
                 "മലയാളം",
+                "मराठी",
                 "ଓଡିଆ",
                 "ਪੰਜਾਬੀ",
                 "संस्कृत",
@@ -223,6 +225,8 @@ Item {
                     }
                 }
             }
+
+            Item { width: parent.width; height: 20 }
         }
     }
 
@@ -284,9 +288,11 @@ Item {
                                 }
                             }
                         }
-                    }                    
+                    }
                 }
             }
+
+            Item { width: parent.width; height: 10 }
         }
     }
 
@@ -432,6 +438,136 @@ Item {
                                     scriteDocument.displayFormat.pageLayout.customResolution = 0
                                 else
                                     scriteDocument.displayFormat.pageLayout.customResolution = value
+                            }
+                        }
+                    }
+                }
+            }
+
+            GroupBox {
+                title: "Window Tabs"
+                width: parent.width - 60
+                anchors.horizontalCenter: parent.horizontalCenter
+
+                Column {
+                    width: parent.width
+                    spacing: 5
+
+                    Text {
+                        width: parent.width
+                        font.pointSize: app.idealFontPointSize
+                        text: "By default Scrite shows Screenplay, Structure and Notebook in separate tabs on the main window. If you have a large display, you can move Notebook into the Structure tab and see all aspects of your screenplay within the Structure tab itself."
+                        wrapMode: Text.WordWrap
+                    }
+
+                    CheckBox2 {
+                        checked: workspaceSettings.showNotebookInStructure
+                        text: "Move Notebook into the Structure tab"
+                        onToggled: workspaceSettings.showNotebookInStructure = checked
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
+        id: relationshipGraphSettingsComponent
+
+        Item {
+            GroupBox {
+                width: parent.width-60
+                anchors.top: parent.top
+                anchors.topMargin: 40
+                anchors.horizontalCenter: parent.horizontalCenter
+                label: Text {
+                    text: "Relationship Graph"
+                }
+
+                Column {
+                    spacing: 10
+                    width: parent.width
+
+                    TextArea {
+                        font.pointSize: app.idealFontPointSize
+                        width: parent.width
+                        wrapMode: Text.WordWrap
+                        textFormat: TextArea.RichText
+                        background: Item { }
+                        text: "<p>Relationship graphs are automatically constructed using the Force Directed Graph algorithm. You can configure attributes of the algorithm using the fields below. The default values work for most cases.</p>" +
+                              "<font size=\"-1\"><ul><li><strong>Max Time</strong> is the number of milliseconds the algorithm can take to compute the graph.</li><li><strong>Max Iterations</strong> is the number of times within max-time the graph can go over each character to determine the ideal placement of nodes and edges in the graph.</li></ul></font>"
+                    }
+
+                    Row {
+                        width: parent.width
+                        spacing: parent.spacing
+
+                        Column {
+                            width: (parent.width - parent.spacing)/2
+
+                            Text {
+                                font.bold: true
+                                font.pointSize: app.idealFontPointSize
+                                text: "Max Time In Milliseconds"
+                                width: parent.width
+                            }
+
+                            Text {
+                                font.bold: false
+                                font.pointSize: app.idealFontPointSize-2
+                                text: "Default: 1000"
+                            }
+
+                            TextField {
+                                id: txtMaxTime
+                                text: notebookSettings.graphLayoutMaxTime
+                                width: parent.width
+                                placeholderText: "if left empty, default of 1000 will be used"
+                                validator: IntValidator {
+                                    bottom: 250
+                                    top: 5000
+                                }
+                                onTextEdited: {
+                                    if(length === 0 || text.trim() === "")
+                                        notebookSettings.graphLayoutMaxTime = 1000
+                                    else
+                                        notebookSettings.graphLayoutMaxTime = parseInt(text)
+                                }
+                                KeyNavigation.tab: txtMaxIterations
+                            }
+                        }
+
+                        Column {
+                            width: (parent.width - parent.spacing)/2
+
+                            Text {
+                                font.bold: true
+                                font.pointSize: app.idealFontPointSize
+                                text: "Max Iterations"
+                                width: parent.width
+                            }
+
+                            Text {
+                                font.bold: false
+                                font.pointSize: app.idealFontPointSize-2
+                                text: "Default: 50000"
+                            }
+
+                            TextField {
+                                id: txtMaxIterations
+                                text: notebookSettings.graphLayoutMaxIterations
+                                width: parent.width
+                                placeholderText: "if left empty, default of 50000 will be used"
+                                validator: IntValidator {
+                                    bottom: 1000
+                                    top: 250000
+                                }
+                                onTextEdited: {
+                                    if(length === 0 || text.trim() === "")
+                                        notebookSettings.graphLayoutMaxIterations = 50000
+                                    else
+                                        notebookSettings.graphLayoutMaxIterations = parseInt(text)
+                                }
+                                KeyNavigation.tab: txtMaxTime
                             }
                         }
                     }
