@@ -623,10 +623,41 @@ void Scene::setTitle(const QString &val)
     if(m_title == val)
         return;
 
-    PushSceneUndoCommand cmd(this);
+    ObjectPropertyInfo *info = ObjectPropertyInfo::get(this, "title");
+    QScopedPointer<PushObjectPropertyUndoCommand> cmd;
+    if(!info->isLocked())
+        cmd.reset(new PushObjectPropertyUndoCommand(this, info->property));
 
     m_title = val;
     emit titleChanged();
+}
+
+void Scene::setEmotionalChange(const QString &val)
+{
+    if(m_emotionalChange == val)
+        return;
+
+    ObjectPropertyInfo *info = ObjectPropertyInfo::get(this, "emotionalChange");
+    QScopedPointer<PushObjectPropertyUndoCommand> cmd;
+    if(!info->isLocked())
+        cmd.reset(new PushObjectPropertyUndoCommand(this, info->property));
+
+    m_emotionalChange = val;
+    emit emotionalChangeChanged();
+}
+
+void Scene::setCharactersInConflict(const QString &val)
+{
+    if(m_charactersInConflict == val)
+        return;
+
+    ObjectPropertyInfo *info = ObjectPropertyInfo::get(this, "charactersInConflict");
+    QScopedPointer<PushObjectPropertyUndoCommand> cmd;
+    if(!info->isLocked())
+        cmd.reset(new PushObjectPropertyUndoCommand(this, info->property));
+
+    m_charactersInConflict = val;
+    emit charactersInConflictChanged();
 }
 
 void Scene::setColor(const QColor &val)
@@ -634,10 +665,51 @@ void Scene::setColor(const QColor &val)
     if(m_color == val)
         return;
 
-    PushSceneUndoCommand cmd(this);
+    ObjectPropertyInfo *info = ObjectPropertyInfo::get(this, "color");
+    QScopedPointer<PushObjectPropertyUndoCommand> cmd;
+    if(!info->isLocked())
+        cmd.reset(new PushObjectPropertyUndoCommand(this, info->property));
 
     m_color = val;
     emit colorChanged();
+}
+
+void Scene::setPageTarget(const QString &val)
+{
+    if(m_pageTarget == val)
+        return;
+
+    ObjectPropertyInfo *info = ObjectPropertyInfo::get(this, "pageTarget");
+    QScopedPointer<PushObjectPropertyUndoCommand> cmd;
+    if(!info->isLocked())
+        cmd.reset(new PushObjectPropertyUndoCommand(this, info->property));
+
+    m_pageTarget = val;
+    emit pageTargetChanged();
+}
+
+bool Scene::validatePageTarget(int pageNumber) const
+{
+    if(m_pageTarget.isEmpty())
+        return true;
+
+    if(pageNumber < 0)
+        return false;
+
+    const QStringList fields = m_pageTarget.split(QStringLiteral(","), QString::SkipEmptyParts);
+    for(QString field : fields)
+    {
+        const QStringList nos = field.trimmed().split(QStringLiteral("-"), QString::SkipEmptyParts);
+        if(nos.isEmpty())
+            continue;
+
+        const int nr1 = nos.first().trimmed().toInt();
+        const int nr2 = nos.size() == 1 ? nr1 : nos.last().trimmed().toInt();
+        if(pageNumber >= qMin(nr1,nr2) && pageNumber <= qMax(nr1,nr2))
+            return true;
+    }
+
+    return false;
 }
 
 void Scene::setEnabled(bool val)
@@ -656,6 +728,20 @@ void Scene::setType(Scene::Type val)
 
     m_type = val;
     emit typeChanged();
+}
+
+void Scene::setComments(const QString &val)
+{
+    if(m_comments == val)
+        return;
+
+    ObjectPropertyInfo *info = ObjectPropertyInfo::get(this, "comments");
+    QScopedPointer<PushObjectPropertyUndoCommand> cmd;
+    if(!info->isLocked())
+        cmd.reset(new PushObjectPropertyUndoCommand(this, info->property));
+
+    m_comments = val;
+    emit commentsChanged();
 }
 
 void Scene::setUndoRedoEnabled(bool val)
@@ -788,6 +874,15 @@ QQmlListProperty<SceneElement> Scene::elements()
                 &Scene::staticClearElements);
 }
 
+SceneElement *Scene::appendElement(const QString &text, int type)
+{
+    SceneElement *element = new SceneElement(this);
+    element->setType(SceneElement::Type(type));
+    element->setText(text);
+    this->addElement(element);
+    return element;
+}
+
 void Scene::addElement(SceneElement *ptr)
 {
     this->insertElementAt(ptr, m_elements.size());
@@ -872,11 +967,30 @@ void Scene::removeElement(SceneElement *ptr)
         GarbageCollector::instance()->add(ptr);
 }
 
-
-
 SceneElement *Scene::elementAt(int index) const
 {
     return index < 0 || index >= m_elements.size() ? nullptr : m_elements.at(index);
+}
+
+void Scene::setElements(const QList<SceneElement *> &list)
+{
+    if(!m_elements.isEmpty() || list.isEmpty())
+        return;
+
+    this->beginResetModel();
+
+    for(SceneElement *ptr : list)
+    {
+        ptr->setParent(this);
+        connect(ptr, &SceneElement::elementChanged, this, &Scene::sceneChanged);
+        connect(ptr, &SceneElement::aboutToDelete, this, &Scene::removeElement);
+        connect(this, &Scene::cursorPositionChanged, ptr, &SceneElement::cursorPositionChanged);
+        m_elements.append(ptr);
+    }
+
+    this->endResetModel();
+
+    emit elementCountChanged();
 }
 
 int Scene::elementCount() const
@@ -952,6 +1066,23 @@ void Scene::removeNote(Note *ptr)
 Note *Scene::noteAt(int index) const
 {
     return index < 0 || index >= m_notes.size() ? nullptr : m_notes.at(index);
+}
+
+void Scene::setNotes(const QList<Note *> &list)
+{
+    if(!m_notes.isEmpty() || list.isEmpty())
+        return;
+
+    for(Note *ptr : list)
+    {
+        ptr->setParent(this);
+
+        connect(ptr, &Note::aboutToDelete, this, &Scene::removeNote);
+        connect(ptr, &Note::noteChanged, this, &Scene::sceneChanged);
+    }
+
+    m_notes.assign(list);
+    emit noteCountChanged();
 }
 
 void Scene::clearNotes()
@@ -1177,6 +1308,23 @@ void Scene::deserializeFromJson(const QJsonObject &json)
 
     for(int i=0; i<invisibleCharacters.size(); i++)
         this->addMuteCharacter(invisibleCharacters.at(i).toString());
+}
+
+bool Scene::canSetPropertyFromObjectList(const QString &propName) const
+{
+    if(propName == QStringLiteral("elements"))
+        return m_elements.isEmpty();
+
+    return false;
+}
+
+void Scene::setPropertyFromObjectList(const QString &propName, const QList<QObject *> &objects)
+{
+    if(propName == QStringLiteral("elements"))
+    {
+        this->setElements(qobject_list_cast<SceneElement*>(objects));
+        return;
+    }
 }
 
 void Scene::setElementsList(const QList<SceneElement *> &list)

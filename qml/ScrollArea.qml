@@ -28,6 +28,36 @@ Flickable {
     boundsBehavior: Flickable.StopAtBounds
     clip: true
 
+    property bool changing: false
+    TrackerPack {
+        delay: 250
+
+        TrackProperty {
+            target: flickable
+            property: "contentX"
+            onTracked: flickable.changing = true
+        }
+        TrackProperty {
+            target: flickable
+            property: "contentY"
+            onTracked: flickable.changing = true
+        }
+        TrackProperty {
+            target: flickable
+            property: "moving"
+            onTracked: flickable.changing = true
+        }
+        TrackProperty {
+            target: flickable
+            property: "flicking"
+            onTracked: flickable.changing = true
+        }
+
+        onTracked: flickable.changing = false
+    }
+
+    signal zoomScaleChangedInteractively()
+
     function zoomIn() {
         zoomScale = Math.min(zoomScale*(1+scrollAreaSettings.zoomFactor), pinchHandler.maximumScale)
     }
@@ -213,6 +243,7 @@ Flickable {
             if(flickable === null)
                 return
             zoomScale = activeScale
+            zoomScaleChangedInteractively()
         }
     }
 
@@ -223,6 +254,7 @@ Flickable {
             zoomOut()
         else
             zoomIn()
+        zoomScaleChangedInteractively()
         result.acceptEvent = true
         result.filter = true
     }

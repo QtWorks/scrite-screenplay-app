@@ -32,6 +32,7 @@
 #include "trackobject.h"
 #include "aggregation.h"
 #include "eventfilter.h"
+#include "timeprofiler.h"
 #include "announcement.h"
 #include "imageprinter.h"
 #include "focustracker.h"
@@ -48,19 +49,22 @@
 #include "transliteration.h"
 #include "openfromlibrary.h"
 #include "abstractexporter.h"
-#include "tightboundingbox.h"
+#include "textdocumentitem.h"
 #include "notebooktabmodel.h"
 #include "genericarraymodel.h"
 #include "screenplayadapter.h"
 #include "spellcheckservice.h"
+#include "colorimageprovider.h"
 #include "tabsequencemanager.h"
 #include "gridbackgrounditem.h"
 #include "notificationmanager.h"
+#include "boundingboxevaluator.h"
 #include "delayedpropertybinder.h"
 #include "screenplaytextdocument.h"
 #include "abstractreportgenerator.h"
 #include "qtextdocumentpagedprinter.h"
 #include "characterrelationshipsgraph.h"
+#include "screenplaytextdocumentoffsets.h"
 
 void ScriteQtMessageHandler(QtMsgType type, const QMessageLogContext & context, const QString &message)
 {
@@ -96,13 +100,15 @@ void ScriteQtMessageHandler(QtMsgType type, const QMessageLogContext & context, 
 
 int main(int argc, char **argv)
 {
-    const QVersionNumber applicationVersion(0, 5, 2);
+    const QVersionNumber applicationVersion(0, 5, 8);
     Application::setApplicationName("Scrite");
     Application::setOrganizationName("TERIFLIX");
     Application::setOrganizationDomain("teriflix.com");
 
 #ifdef Q_OS_MAC
     Application::setApplicationVersion(applicationVersion.toString() + "-beta");
+    if(QOperatingSystemVersion::current() > QOperatingSystemVersion::MacOSCatalina)
+        qputenv("QT_MAC_WANTS_LAYER", QByteArrayLiteral("1"));
 #else
     if(QSysInfo::WordSize == 32)
         Application::setApplicationVersion(applicationVersion.toString() + "-beta-x86");
@@ -135,7 +141,13 @@ int main(int argc, char **argv)
         return new StandardPaths(engine);
     });
 
+    const QString apreason("Use as attached property.");
     const QString reason("Instantiation from QML not allowed.");
+
+#ifdef ENABLE_TIME_PROFILING
+    qmlRegisterUncreatableType<ProfilerItem>("Scrite", 1, 0, "Profiler", apreason);
+#endif
+
     qmlRegisterUncreatableType<ScriteDocument>("Scrite", 1, 0, "ScriteDocument", reason);
 
     qmlRegisterType<Scene>("Scrite", 1, 0, "Scene");
@@ -149,6 +161,7 @@ int main(int argc, char **argv)
     qmlRegisterUncreatableType<Structure>("Scrite", 1, 0, "Structure", reason);
     qmlRegisterType<StructureElement>("Scrite", 1, 0, "StructureElement");
     qmlRegisterType<StructureElementConnector>("Scrite", 1, 0, "StructureElementConnector");
+    qmlRegisterType<StructureCanvasViewportFilterModel>("Scrite", 1, 0, "StructureCanvasViewportFilterModel");
 
     qmlRegisterType<Note>("Scrite", 1, 0, "Note");
     qmlRegisterType<Relationship>("Scrite", 1, 0, "Relationship");
@@ -161,13 +174,14 @@ int main(int argc, char **argv)
     qmlRegisterUncreatableType<ScreenplayPageLayout>("Scrite", 1, 0, "ScreenplayPageLayout", reason);
 
     qmlRegisterType<SceneDocumentBinder>("Scrite", 1, 0, "SceneDocumentBinder");
+    qmlRegisterUncreatableType<TextFormat>("Scrite", 1, 0, "TextFormat", "Use the instance provided by SceneDocumentBinder.textFormat property.");
 
     qmlRegisterType<GridBackgroundItem>("Scrite", 1, 0, "GridBackground");
     qmlRegisterUncreatableType<GridBackgroundItemBorder>("Scrite", 1, 0, "GridBackgroundItemBorder", reason);
     qmlRegisterType<Completer>("Scrite", 1, 0, "Completer");
 
     qmlRegisterUncreatableType<EventFilterResult>("Scrite", 1, 0, "EventFilterResult", "Use the instance provided by EventFilter.onFilter signal.");
-    qmlRegisterUncreatableType<EventFilter>("Scrite", 1, 0, "EventFilter", "Use as attached property.");
+    qmlRegisterUncreatableType<EventFilter>("Scrite", 1, 0, "EventFilter", apreason);
 
     qmlRegisterType<PainterPathItem>("Scrite", 1, 0, "PainterPathItem");
     qmlRegisterUncreatableType<AbstractPathElement>("Scrite", 1, 0, "PathElement", "Use subclasses of AbstractPathElement.");
@@ -183,16 +197,16 @@ int main(int argc, char **argv)
 
     qmlRegisterType<SearchEngine>("Scrite", 1, 0, "SearchEngine");
     qmlRegisterType<TextDocumentSearch>("Scrite", 1, 0, "TextDocumentSearch");
-    qmlRegisterUncreatableType<SearchAgent>("Scrite", 1, 0, "SearchAgent", "Use as attached property.");
+    qmlRegisterUncreatableType<SearchAgent>("Scrite", 1, 0, "SearchAgent", apreason);
 
-    qmlRegisterUncreatableType<Notification>("Scrite", 1, 0, "Notification", "Use as attached property.");
+    qmlRegisterUncreatableType<Notification>("Scrite", 1, 0, "Notification", apreason);
     qmlRegisterUncreatableType<NotificationManager>("Scrite", 1, 0, "NotificationManager", "Use notificationManager instead.");
 
     qmlRegisterUncreatableType<ErrorReport>("Scrite", 1, 0, "ErrorReport", reason);
     qmlRegisterUncreatableType<ProgressReport>("Scrite", 1, 0, "ProgressReport", reason);
 
     qmlRegisterUncreatableType<TransliterationEngine>("Scrite", 1, 0, "TransliterationEngine", "Use app.transliterationEngine instead.");
-    qmlRegisterUncreatableType<Transliterator>("Scrite", 1, 0, "Transliterator", "Use as attached property.");
+    qmlRegisterUncreatableType<Transliterator>("Scrite", 1, 0, "Transliterator", apreason);
     qmlRegisterType<TransliteratedText>("Scrite", 1, 0, "TransliteratedText");
 
     qmlRegisterUncreatableType<AbstractExporter>("Scrite", 1, 0, "AbstractExporter", reason);
@@ -226,18 +240,20 @@ int main(int argc, char **argv)
     qmlRegisterType<ScreenplayTextDocument>("Scrite", 1, 0, "ScreenplayTextDocument");
     qmlRegisterType<ScreenplayElementPageBreaks>("Scrite", 1, 0, "ScreenplayElementPageBreaks");
     qmlRegisterType<ImagePrinter>("Scrite", 1, 0, "ImagePrinter");
+    qmlRegisterType<TextDocumentItem>("Scrite", 1, 0, "TextDocumentItem");
+    qmlRegisterType<ScreenplayTextDocumentOffsets>("Scrite", 1, 0, "ScreenplayTextDocumentOffsets");
 
     qmlRegisterType<RulerItem>("Scrite", 1, 0, "RulerItem");
 
     qmlRegisterType<SpellCheckService>("Scrite", 1, 0, "SpellCheckService");
 
-    qmlRegisterType<TightBoundingBoxEvaluator>("Scrite", 1, 0, "TightBoundingBoxEvaluator");
-    qmlRegisterType<TightBoundingBoxPreview>("Scrite", 1, 0, "TightBoundingBoxPreview");
-    qmlRegisterUncreatableType<TightBoundingBoxItem>("Scrite", 1, 0, "TightBoundingBoxItem", "Use as attached property.");
+    qmlRegisterType<BoundingBoxEvaluator>("Scrite", 1, 0, "BoundingBoxEvaluator");
+    qmlRegisterType<BoundingBoxPreview>("Scrite", 1, 0, "BoundingBoxPreview");
+    qmlRegisterUncreatableType<BoundingBoxItem>("Scrite", 1, 0, "BoundingBoxItem", apreason);
 
     qmlRegisterType<FileInfo>("Scrite", 1, 0, "FileInfo");
 
-    qmlRegisterUncreatableType<ShortcutsModelItem>("Scrite", 1, 0, "ShortcutsModelItem", "Use as attached property.");
+    qmlRegisterUncreatableType<ShortcutsModelItem>("Scrite", 1, 0, "ShortcutsModelItem", apreason);
 
     qmlRegisterType<LibraryService>("Scrite", 1, 0, "LibraryService");
     qmlRegisterUncreatableType<Library>("Scrite", 1, 0, "Library", "Use from LibraryService.library");
@@ -247,9 +263,9 @@ int main(int argc, char **argv)
     qmlRegisterUncreatableType<QAbstractItemModel>("Scrite", 1, 0, "Model", "Base type of models (QAbstractItemModel)");
 
     qmlRegisterType<TabSequenceManager>("Scrite", 1, 0, "TabSequenceManager");
-    qmlRegisterUncreatableType<TabSequenceItem>("Scrite", 1, 0, "TabSequenceItem", "Use as attached property.");
+    qmlRegisterUncreatableType<TabSequenceItem>("Scrite", 1, 0, "TabSequenceItem", apreason);
 
-    qmlRegisterUncreatableType<Announcement>("Scrite", 1, 0, "Announcement", "Use as attached property.");
+    qmlRegisterUncreatableType<Announcement>("Scrite", 1, 0, "Announcement", apreason);
 
     qmlRegisterType<NotebookTabModel>("Scrite", 1, 0, "NotebookTabModel");
 
@@ -285,6 +301,9 @@ int main(int argc, char **argv)
     QQuickStyle::setStyle("Material");
 
     QQuickView qmlView;
+#ifdef Q_OS_MAC
+    qmlView.setFlag(Qt::WindowFullscreenButtonHint); // [0.5.2 All] Full Screen Mode #194
+#endif
     qmlView.setObjectName(QStringLiteral("ScriteQmlWindow"));
     qmlView.setFormat(format);
 #ifdef Q_OS_WIN
@@ -298,11 +317,46 @@ int main(int argc, char **argv)
     a.initializeStandardColors(qmlView.engine());
     qmlView.setTitle(scriteDocument->documentWindowTitle());
     QObject::connect(scriteDocument, &ScriteDocument::documentWindowTitleChanged, &qmlView, &QQuickView::setTitle);
+    qmlView.engine()->addImageProvider(QStringLiteral("color"), new ColorImageProvider);
     qmlView.engine()->rootContext()->setContextProperty("app", &a);
     qmlView.engine()->rootContext()->setContextProperty("qmlWindow", &qmlView);
     qmlView.engine()->rootContext()->setContextProperty("scriteDocument", scriteDocument);
     qmlView.engine()->rootContext()->setContextProperty("shortcutsModel", ShortcutsModel::instance());
     qmlView.engine()->rootContext()->setContextProperty("notificationManager", &notificationManager);
+
+    QString fileNameToOpen;
+
+#ifdef Q_OS_MAC
+    if(!a.fileToOpen().isEmpty())
+        fileNameToOpen = a.fileToOpen();
+    a.setHandleFileOpenEvents(true);
+#else
+    if(a.arguments().size() > 1)
+    {
+        bool hasOptions = false;
+        Q_FOREACH(QString arg, a.arguments())
+        {
+            if(arg.startsWith(QStringLiteral("--")))
+            {
+                hasOptions = true;
+                break;
+            }
+        }
+
+        if(!hasOptions)
+        {
+#ifdef Q_OS_WIN
+            fileNameToOpen = a.arguments().last();
+#else
+            QStringList args = a.arguments();
+            args.takeFirst();
+            fileNameToOpen = args.join( QStringLiteral(" ") );
+#endif
+        }
+    }
+#endif
+
+    qmlView.rootContext()->setContextProperty(QStringLiteral("fileNameToOpen"), fileNameToOpen);
     qmlView.setResizeMode(QQuickView::SizeRootObjectToView);
     Automation::init(&qmlView);
     qmlView.setSource(QUrl("qrc:/main.qml"));
@@ -335,23 +389,6 @@ int main(int argc, char **argv)
 #endif
 
     QObject::connect(&a, &Application::minimizeWindowRequest, &qmlView, &QQuickView::showMinimized);
-
-#ifdef Q_OS_MAC
-    if(!a.fileToOpen().isEmpty())
-        scriteDocument->open(a.fileToOpen());
-    a.setHandleFileOpenEvents(true);
-#else
-    if(a.arguments().size() > 1)
-    {
-#ifdef Q_OS_WIN
-        scriteDocument->open( a.arguments().last() );
-#else
-        QStringList args = a.arguments();
-        args.takeFirst();
-        scriteDocument->open( args.join(QStringLiteral(" ")) );
-#endif
-    }
-#endif
 
     return a.exec();
 }

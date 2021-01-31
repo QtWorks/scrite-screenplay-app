@@ -15,6 +15,7 @@
 #define OBJECTLISTPROPERTYMODEL_H
 
 #include <QList>
+#include <QMetaMethod>
 #include <QAbstractListModel>
 
 class ObjectListPropertyModelBase : public QAbstractListModel
@@ -57,9 +58,9 @@ public:
     }
 
     void prepend(T ptr) {
-        this->beginRemoveRows(QModelIndex(), 0, 0);
+        this->beginInsertRows(QModelIndex(), 0, 0);
         m_list.prepend(ptr);
-        this->endRemoveRows();
+        this->endInsertRows();
     }
 
     int indexOf(T ptr) const { return m_list.indexOf(ptr); }
@@ -69,12 +70,15 @@ public:
             return;
 
         this->beginRemoveRows(QModelIndex(), row, row);
+        T ptr = m_list.at(row);
+        ptr->disconnect(this);
         m_list.removeAt(row);
         this->endRemoveRows();
     }
 
     void insert(int row, T ptr) {
         int iidx = row < 0 || row >= m_list.size() ? m_list.size() : row;
+
         this->beginInsertRows(QModelIndex(), iidx, iidx);
         m_list.insert(iidx, ptr);
         this->endInsertRows();
@@ -103,6 +107,8 @@ public:
 
     void clear() {
         this->beginResetModel();
+        for(T ptr : m_list)
+            ptr->disconnect(this);
         m_list.clear();
         this->endResetModel();
     }
@@ -159,8 +165,46 @@ public:
     int objectCount() const { return m_list.size(); }
     QObject *objectAt(int row) const { return this->at(row); }
 
+public:
+    void objectChanged() {
+        T ptr = qobject_cast<T>(this->sender());
+        if(ptr == nullptr)
+            return;
+        const int row = m_list.indexOf(ptr);
+        if(row < 0)
+            return;
+        const QModelIndex index = this->index(row, 0, QModelIndex());
+        emit dataChanged(index, index);
+    }
+
+    void objectDestroyed(T ptr) {
+        if(ptr == nullptr)
+            return;
+        const int row = m_list.indexOf(ptr);
+        if(row < 0)
+            return;
+        this->removeAt(row);
+    }
+
 private:
     QList<T> m_list;
 };
+
+template <class T>
+inline QList<T> qobject_list_cast(const QList<QObject*> &list, bool deleteUncasedObjects=true)
+{
+    QList<T> ret;
+    ret.reserve(list.size());
+    for(QObject *ptr : list)
+    {
+        T item = qobject_cast<T>(ptr);
+        if(item != nullptr)
+            ret.append(item);
+        else if(deleteUncasedObjects)
+            ptr->deleteLater();
+    }
+
+    return ret;
+}
 
 #endif // OBJECTLISTPROPERTYMODEL_H

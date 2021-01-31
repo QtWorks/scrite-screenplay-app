@@ -51,6 +51,11 @@ public:
     int breakType() const { return m_breakType; }
     Q_SIGNAL void breakTypeChanged();
 
+    Q_PROPERTY(QString breakTitle READ breakTitle WRITE setBreakTitle NOTIFY breakTitleChanged)
+    void setBreakTitle(const QString &val);
+    QString breakTitle() const { return m_breakTitle.isEmpty() ? this->sceneID() : m_breakTitle; }
+    Q_SIGNAL void breakTitleChanged();
+
     Q_PROPERTY(Screenplay* screenplay READ screenplay WRITE setScreenplay NOTIFY screenplayChanged STORED false RESET resetScreenplay)
     void setScreenplay(Screenplay *val);
     Screenplay* screenplay() const { return m_screenplay; }
@@ -63,6 +68,18 @@ public:
     Q_PROPERTY(int sceneNumber READ sceneNumber NOTIFY sceneNumberChanged)
     int sceneNumber() const { return m_customSceneNumber < 0 ? m_sceneNumber : m_customSceneNumber; }
     Q_SIGNAL void sceneNumberChanged();
+
+    Q_PROPERTY(QString userSceneNumber READ userSceneNumber WRITE setUserSceneNumber NOTIFY userSceneNumberChanged)
+    void setUserSceneNumber(const QString &val);
+    QString userSceneNumber() const { return m_userSceneNumber; }
+    Q_SIGNAL void userSceneNumberChanged();
+
+    Q_PROPERTY(bool hasUserSceneNumber READ hasUserSceneNumber NOTIFY userSceneNumberChanged)
+    bool hasUserSceneNumber() const { return !m_userSceneNumber.isEmpty(); }
+
+    Q_PROPERTY(QString resolvedSceneNumber READ resolvedSceneNumber NOTIFY resolvedSceneNumberChanged)
+    QString resolvedSceneNumber() const;
+    Q_SIGNAL void resolvedSceneNumberChanged();
 
     Q_PROPERTY(Scene* scene READ scene NOTIFY sceneChanged STORED false RESET resetScene)
     void setScene(Scene *val);
@@ -78,6 +95,18 @@ public:
     void setUserData(const QJsonValue &val);
     QJsonValue userData() const { return m_userData; }
     Q_SIGNAL void userDataChanged();
+
+    Q_PROPERTY(QJsonValue editorHints READ editorHints WRITE setEditorHints NOTIFY editorHintsChanged)
+    void setEditorHints(const QJsonValue &val);
+    QJsonValue editorHints() const { return m_editorHints; }
+    Q_SIGNAL void editorHintsChanged();
+
+    Q_PROPERTY(bool selected READ isSelected WRITE setSelected NOTIFY selectedChanged STORED false)
+    void setSelected(bool val);
+    bool isSelected() const { return m_selected; }
+    Q_SIGNAL void selectedChanged();
+
+    Q_INVOKABLE void toggleSelection() { this->setSelected(!m_selected); }
 
     Q_SIGNAL void elementChanged();
 
@@ -96,11 +125,15 @@ private:
     friend class Screenplay;
     bool m_expanded = true;
     int m_breakType = -1;
+    bool m_selected = false;
     int m_sceneNumber = -1;
     QString m_sceneID;
+    QString m_breakTitle;
     QJsonValue m_userData;
     int m_customSceneNumber = -1;
     bool m_elementTypeIsSet = false;
+    QJsonValue m_editorHints;
+    QString m_userSceneNumber;
     ElementType m_elementType = SceneElementType;
     QObjectProperty<Scene> m_scene;
     QObjectProperty<Screenplay> m_screenplay;
@@ -128,6 +161,11 @@ public:
     void setSubtitle(const QString &val);
     QString subtitle() const { return m_subtitle; }
     Q_SIGNAL void subtitleChanged();
+
+    Q_PROPERTY(QString logline READ logline WRITE setLogline NOTIFY loglineChanged)
+    void setLogline(const QString &val);
+    QString logline() const { return m_logline; }
+    Q_SIGNAL void loglineChanged();
 
     Q_PROPERTY(QString basedOn READ basedOn WRITE setBasedOn NOTIFY basedOnChanged)
     void setBasedOn(const QString &val);
@@ -182,6 +220,11 @@ public:
     CoverPagePhotoSize coverPagePhotoSize() const { return m_coverPagePhotoSize; }
     Q_SIGNAL void coverPagePhotoSizeChanged();
 
+    Q_PROPERTY(bool titlePageIsCentered READ isTitlePageIsCentered WRITE setTitlePageIsCentered NOTIFY titlePageIsCenteredChanged)
+    void setTitlePageIsCentered(bool val);
+    bool isTitlePageIsCentered() const { return m_titlePageIsCentered; }
+    Q_SIGNAL void titlePageIsCenteredChanged();
+
     Q_PROPERTY(bool hasTitlePageAttributes READ hasTitlePageAttributes NOTIFY hasTitlePageAttributesChanged)
     bool hasTitlePageAttributes() const { return m_hasTitlePageAttributes; }
     Q_SIGNAL void hasTitlePageAttributesChanged();
@@ -197,6 +240,9 @@ public:
     Q_INVOKABLE void insertElementAt(ScreenplayElement *ptr, int index);
     Q_INVOKABLE void removeElement(ScreenplayElement *ptr);
     Q_INVOKABLE void moveElement(ScreenplayElement *ptr, int toRow);
+    Q_INVOKABLE void moveSelectedElements(int toRow);
+    Q_INVOKABLE void removeSelectedElements();
+    Q_INVOKABLE void clearSelection();
     Q_INVOKABLE ScreenplayElement *elementAt(int index) const;
     Q_PROPERTY(int elementCount READ elementCount NOTIFY elementCountChanged)
     int elementCount() const;
@@ -215,6 +261,11 @@ public:
     Q_INVOKABLE int indexOfElement(ScreenplayElement *element) const;
     Q_INVOKABLE QList<int> sceneElementIndexes(Scene *scene, int max=-1) const;
     QList<ScreenplayElement*> sceneElements(Scene *scene, int max=-1) const;
+    Q_INVOKABLE int firstSceneIndex() const;
+    Q_INVOKABLE int lastSceneIndex() const;
+
+    QList<ScreenplayElement*> getElements() const { return m_elements; }
+    bool setElements(const QList<ScreenplayElement*> &list);
 
     enum BreakType
     {
@@ -224,7 +275,10 @@ public:
     };
     Q_ENUM(BreakType)
     Q_INVOKABLE void addBreakElement(BreakType type);
+    Q_INVOKABLE void addBreakElementI(int type) { this->addBreakElement(BreakType(type)); }
     Q_INVOKABLE void insertBreakElement(BreakType type, int index);
+    Q_INVOKABLE void insertBreakElementI(int type, int index) { this->insertBreakElement(BreakType(type), index); }
+    Q_SIGNAL void breakTitleChanged();
 
     Q_SIGNAL void screenplayChanged();
 
@@ -249,9 +303,11 @@ public:
     // QObjectSerializer::Interface interface
     void serializeToJson(QJsonObject &) const;
     void deserializeFromJson(const QJsonObject &);
+    bool canSetPropertyFromObjectList(const QString &propName) const;
+    void setPropertyFromObjectList(const QString &propName, const QList<QObject*> &objects);
 
     // QAbstractItemModel interface
-    enum Roles { ScreenplayElementRole = Qt::UserRole };
+    enum Roles { IdRole = Qt::UserRole, ScreenplayElementRole, ScreenplayElementTypeRole, BreakTypeRole, SceneRole, RowNumberRole };
     int rowCount(const QModelIndex &parent) const;
     QVariant data(const QModelIndex &index, int role) const;
     QHash<int,QByteArray> roleNames() const;
@@ -267,12 +323,14 @@ protected:
     void setHasNonStandardScenes(bool val);
     void setHasTitlePageAttributes(bool val);
     void evaluateHasTitlePageAttributes();
+    QList<ScreenplayElement*> takeSelectedElements();
 
 private:
     QString m_title;
     QString m_email;
     QString m_author;
     QString m_basedOn;
+    QString m_logline;
     QString m_contact;
     QString m_version;
     QString m_website;
@@ -280,6 +338,7 @@ private:
     QString m_subtitle;
     QString m_phoneNumber;
     QString m_coverPagePhoto;
+    bool m_titlePageIsCentered = true;
     bool m_hasTitlePageAttributes = false;
     ScriteDocument *m_scriteDocument = nullptr;
     CoverPagePhotoSize m_coverPagePhotoSize = LargeCoverPhoto;
@@ -288,7 +347,8 @@ private:
     static void staticClearElements(QQmlListProperty<ScreenplayElement> *list);
     static ScreenplayElement* staticElementAt(QQmlListProperty<ScreenplayElement> *list, int index);
     static int staticElementCount(QQmlListProperty<ScreenplayElement> *list);
-    QList<ScreenplayElement *> m_elements;
+    QList<ScreenplayElement *> m_elements; // We dont use ObjectListPropertyModel<ScreenplayElement*> for this because
+                                           // the Screenplay class is already a list model of screenplay elements.
     int m_currentElementIndex = -1;
     QObjectProperty<Scene> m_activeScene;
     bool m_hasNonStandardScenes = false;

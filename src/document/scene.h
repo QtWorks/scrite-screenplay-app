@@ -19,12 +19,13 @@
 #include <QColor>
 #include <QPointer>
 #include <QJsonArray>
+#include <QTextLayout>
 #include <QUndoCommand>
 #include <QReadWriteLock>
 #include <QQmlListProperty>
+#include <QQuickPaintedItem>
 #include <QAbstractListModel>
 #include <QQuickTextDocument>
-#include <QQuickPaintedItem>
 
 #include "note.h"
 #include "modifiable.h"
@@ -149,6 +150,7 @@ public:
     bool include(SceneElement *element);
     bool remove(SceneElement *element);
     bool remove(const QString &name);
+    bool isEmpty() const { return m_forwardMap.isEmpty() && m_reverseMap.isEmpty(); }
 
     QStringList characterNames() const;
     QList<SceneElement*> characterElements() const;
@@ -191,22 +193,46 @@ public:
     QString title() const { return m_title; }
     Q_SIGNAL void titleChanged();
 
+    Q_PROPERTY(QString emotionalChange READ emotionalChange WRITE setEmotionalChange NOTIFY emotionalChangeChanged)
+    void setEmotionalChange(const QString &val);
+    QString emotionalChange() const { return m_emotionalChange; }
+    Q_SIGNAL void emotionalChangeChanged();
+
+    Q_PROPERTY(QString charactersInConflict READ charactersInConflict WRITE setCharactersInConflict NOTIFY charactersInConflictChanged)
+    void setCharactersInConflict(const QString &val);
+    QString charactersInConflict() const { return m_charactersInConflict; }
+    Q_SIGNAL void charactersInConflictChanged();
+
     Q_PROPERTY(QColor color READ color WRITE setColor NOTIFY colorChanged)
     void setColor(const QColor &val);
     QColor color() const { return m_color; }
     Q_SIGNAL void colorChanged();
+
+    // Stored as a string, but it must be either a page number or a page range.
+    // Valid values will be of the form "20", "30-50", "10,20,30", "35 45" etc..
+    Q_PROPERTY(QString pageTarget READ pageTarget WRITE setPageTarget NOTIFY pageTargetChanged)
+    void setPageTarget(const QString &val);
+    QString pageTarget() const { return m_pageTarget; }
+    Q_SIGNAL void pageTargetChanged();
+
+    Q_INVOKABLE bool validatePageTarget(int pageNumber) const;
 
     Q_PROPERTY(bool enabled READ isEnabled WRITE setEnabled NOTIFY enabledChanged)
     void setEnabled(bool val);
     bool isEnabled() const { return m_enabled; }
     Q_SIGNAL void enabledChanged();
 
-    enum Type { Standard=0, Song, Action };
+    enum Type { Standard=0, Song, Action, Montage };
     Q_ENUM(Type)
     Q_PROPERTY(Type type READ type WRITE setType NOTIFY typeChanged)
     void setType(Type val);
     Type type() const { return m_type; }
     Q_SIGNAL void typeChanged();
+
+    Q_PROPERTY(QString comments READ comments WRITE setComments NOTIFY commentsChanged)
+    void setComments(const QString &val);
+    QString comments() const { return m_comments; }
+    Q_SIGNAL void commentsChanged();
 
     Q_PROPERTY(bool isBeingReset READ isBeingReset NOTIFY resetStateChanged)
     bool isBeingReset() const { return m_isBeingReset; }
@@ -225,6 +251,9 @@ public:
     Q_PROPERTY(SceneHeading* heading READ heading CONSTANT)
     SceneHeading* heading() const { return m_heading; }
 
+    Q_PROPERTY(bool hasCharacters READ hasCharacters NOTIFY characterNamesChanged)
+    bool hasCharacters() const { return !m_characterElementMap.isEmpty(); }
+
     Q_PROPERTY(QStringList characterNames READ characterNames NOTIFY characterNamesChanged)
     QStringList characterNames() const { return m_characterElementMap.characterNames(); }
     Q_SIGNAL void characterNamesChanged();
@@ -234,8 +263,9 @@ public:
     Q_INVOKABLE bool isCharacterMute(const QString &characterName) const;
     void scanMuteCharacters(const QStringList &characterNames=QStringList());
 
-    Q_PROPERTY(QQmlListProperty<SceneElement> elements READ elements)
+    Q_PROPERTY(QQmlListProperty<SceneElement> elements READ elements NOTIFY elementCountChanged)
     QQmlListProperty<SceneElement> elements();
+    Q_INVOKABLE SceneElement *appendElement(const QString &text, int type=SceneElement::Action);
     Q_INVOKABLE void addElement(SceneElement *ptr);
     Q_INVOKABLE void insertElementAfter(SceneElement *ptr, SceneElement *after);
     Q_INVOKABLE void insertElementBefore(SceneElement *ptr, SceneElement *before);
@@ -243,6 +273,7 @@ public:
     Q_INVOKABLE void removeElement(SceneElement *ptr);
     Q_INVOKABLE int  indexOfElement(SceneElement *ptr) { return m_elements.indexOf(ptr); }
     Q_INVOKABLE SceneElement *elementAt(int index) const;
+    void setElements(const QList<SceneElement *> &list);
     Q_PROPERTY(int elementCount READ elementCount NOTIFY elementCountChanged)
     int elementCount() const;
     Q_INVOKABLE void clearElements();
@@ -258,7 +289,7 @@ public:
     Q_SIGNAL void sceneAboutToReset();
     Q_SIGNAL void sceneReset(int elementIndex);
 
-    Q_PROPERTY(QAbstractListModel* notesModel READ notesModel CONSTANT)
+    Q_PROPERTY(QAbstractListModel* notesModel READ notesModel CONSTANT STORED false)
     QAbstractListModel *notesModel() const { return &((const_cast<Scene*>(this))->m_notes); }
 
     Q_PROPERTY(QQmlListProperty<Note> notes READ notes)
@@ -266,6 +297,7 @@ public:
     Q_INVOKABLE void addNote(Note *ptr);
     Q_INVOKABLE void removeNote(Note *ptr);
     Q_INVOKABLE Note *noteAt(int index) const;
+    void setNotes(const QList<Note*> &list);
     Q_PROPERTY(int noteCount READ noteCount NOTIFY noteCountChanged)
     int noteCount() const { return m_notes.size(); }
     Q_INVOKABLE void clearNotes();
@@ -295,6 +327,8 @@ public:
     // QObjectSerializer::Interface interface
     void serializeToJson(QJsonObject &json) const;
     void deserializeFromJson(const QJsonObject &json);
+    bool canSetPropertyFromObjectList(const QString &propName) const;
+    void setPropertyFromObjectList(const QString &propName, const QList<QObject*> &objects);
 
 private:
     QList<SceneElement *> elementsList() const { return m_elements; }
@@ -311,6 +345,11 @@ private:
     Type m_type = Standard;
     QColor m_color = QColor(Qt::white);
     QString m_title;
+    QString m_comments;
+    QString m_emotionalChange;
+    QString m_charactersInConflict;
+    QString m_pageTarget;
+
     bool m_enabled = true;
     char m_padding[7];
     mutable QString m_id;

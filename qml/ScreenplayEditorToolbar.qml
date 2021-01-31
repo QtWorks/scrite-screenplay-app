@@ -47,8 +47,8 @@ Row {
     }
 
     ToolButton3 {
-        iconSource: "../icons/screenplay/character.png"
-        ToolTip.text: "Toggle display of character names under scene headings and scan for hidden characters in each scene."
+        iconSource: "../icons/action/flag.png"
+        ToolTip.text: "Toggle display of character names & synopsis under scene headings and scan for hidden characters in each scene."
         ToolTip.delay: 1000
         down: sceneCharactersMenu.visible
         onClicked: sceneCharactersMenu.visible = true
@@ -82,8 +82,14 @@ Row {
 
                 MenuItem2 {
                     text: "Display Scene Synopsis"
-                    icon.source: screenplayEditorSettings.displaySceneNotes ? "../icons/navigation/check.png" : "../icons/content/blank.png"
-                    onTriggered: screenplayEditorSettings.displaySceneNotes = !screenplayEditorSettings.displaySceneNotes
+                    icon.source: screenplayEditorSettings.displaySceneSynopsis && enabled ? "../icons/navigation/check.png" : "../icons/content/blank.png"
+                    onTriggered: screenplayEditorSettings.displaySceneSynopsis = !screenplayEditorSettings.displaySceneSynopsis
+                }
+
+                MenuItem2 {
+                    text: "Display Scene Comments"
+                    icon.source: screenplayEditorSettings.displaySceneComments && enabled ? "../icons/navigation/check.png" : "../icons/content/blank.png"
+                    onTriggered: screenplayEditorSettings.displaySceneComments = !screenplayEditorSettings.displaySceneComments
                 }
             }
         }
@@ -128,6 +134,26 @@ Row {
     }
 
     ToolButton3 {
+        iconSource: "../icons/content/add_box.png"
+        shortcut: "Ctrl+Shift+B"
+        shortcutText: ""
+        ToolTip.text: "Creates an act break after the current scene in the screenplay.\t(" + app.polishShortcutTextForDisplay(shortcut) + ")"
+        enabled: !showScreenplayPreview && !scriteDocument.readOnly
+        onClicked: {
+            requestScreenplayEditor()
+            if(scriteDocument.screenplay.currentElementIndex < 0)
+                scriteDocument.screenplay.addBreakElement(Screenplay.Act)
+            else
+                scriteDocument.screenplay.insertBreakElement(Screenplay.Act, scriteDocument.screenplay.currentElementIndex+1)
+        }
+
+        ShortcutsModelItem.group: "Edit"
+        ShortcutsModelItem.title: "Create New Scene"
+        ShortcutsModelItem.enabled: !scriteDocument.readOnly
+        ShortcutsModelItem.shortcut: shortcut
+    }
+
+    ToolButton3 {
         iconSource: "../icons/navigation/refresh.png"
         shortcut: "F5"
         shortcutText: ""
@@ -135,7 +161,7 @@ Row {
         enabled: binder && !showScreenplayPreview ? true : false
         onClicked: {
             var cp = editor.cursorPosition
-            binder.reload()
+            binder.preserveScrollAndReload()
             if(cp >= 0)
                 editor.cursorPosition = cp
         }

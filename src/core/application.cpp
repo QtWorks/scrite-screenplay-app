@@ -24,6 +24,7 @@
 #include <QScreen>
 #include <QtDebug>
 #include <QCursor>
+#include <QScreen>
 #include <QWindow>
 #include <QPointer>
 #include <QProcess>
@@ -40,7 +41,6 @@
 #include <QFontDatabase>
 #include <QStandardPaths>
 #include <QOperatingSystemVersion>
-#include <QScreen>
 
 #define ENABLE_SCRIPT_HOTKEY
 
@@ -96,6 +96,27 @@ Application::Application(int &argc, char **argv, const QVersionNumber &version)
     }
     m_settings->setValue( QStringLiteral("Installation/version"), m_versionNumber.toString() );
 
+    if(sversion.isNull() || sversion <= QVersionNumber(0,5,3))
+    {
+        const QString customResKey = QStringLiteral("ScreenplayPageLayout/customResolution");
+        const QString forceCustomResKey = QStringLiteral("ScreenplayPageLayout/forceCustomResolution");
+        const bool customResAlreadySet = m_settings->value(customResKey, 0).toDouble() > 0;
+        const bool forceCustomRes = !customResAlreadySet && m_settings->value(forceCustomResKey, true).toBool();
+        if(forceCustomRes)
+        {
+#ifdef Q_OS_MAC
+            m_settings->setValue(customResKey, 72);
+#endif
+#ifdef Q_OS_WIN
+            m_settings->setValue(customResKey, 96);
+#endif
+        }
+
+        m_settings->setValue(forceCustomResKey, false);
+    }
+
+    m_settings->sync();
+
     TransliterationEngine::instance(this);
     SystemTextInputManager::instance();
 }
@@ -136,11 +157,6 @@ QDateTime Application::installationTimestamp() const
 int Application::launchCounter() const
 {
     return m_settings->value("Installation/launchCount", 0).toInt();
-}
-
-QString Application::buildTimestamp() const
-{
-    return QString::fromLatin1(__TIMESTAMP__);
 }
 
 QUrl Application::toHttpUrl(const QUrl &url) const
@@ -799,6 +815,12 @@ QString Application::sanitiseFileName(const QString &fileName) const
     return fileName;
 }
 
+void Application::log(const QString &message)
+{
+    fprintf(stdout, "%s\n", qPrintable(message));
+    fflush(stdout);
+}
+
 bool Application::event(QEvent *event)
 {
 #ifdef Q_OS_MAC
@@ -1013,13 +1035,37 @@ bool Application::restoreWindowGeometry(QWindow *window, const QString &group)
     if(window == nullptr)
         return false;
 
+    const QString geometryArg = QStringLiteral("--windowGeometry");
+    const int geometryArgPos = this->arguments().indexOf(geometryArg);
+    if(geometryArgPos >= 0 && this->arguments().size() >= geometryArgPos+5)
+    {
+        const int x = this->arguments().at(geometryArgPos+1).toInt();
+        const int y = this->arguments().at(geometryArgPos+2).toInt();
+        const int w = this->arguments().at(geometryArgPos+3).toInt();
+        const int h = this->arguments().at(geometryArgPos+4).toInt();
+        window->setGeometry(x, y, w, h);
+        return true;
+    }
+
     const QScreen *screen = window->screen();
     const QRect screenGeo = screen->availableGeometry();
 
     const QString geometryString = m_settings->value(group + QStringLiteral("/windowGeometry")).toString();
     if(geometryString == QStringLiteral("Maximized"))
     {
+#ifdef Q_OS_WIN
         window->setGeometry(screenGeo);
+        QTimer *timer = new QTimer(window);
+        timer->setInterval(100);
+        timer->setSingleShot(true);
+        connect(timer, &QTimer::timeout, [=]() {
+            window->showMaximized();
+            timer->deleteLater();
+        });
+        timer->start();
+#else
+        window->setGeometry(screenGeo);
+#endif
         return true;
     }
 
@@ -1030,10 +1076,14 @@ bool Application::restoreWindowGeometry(QWindow *window, const QString &group)
         return false;
     }
 
-    const int x = geometry.at(0).toInt();
-    const int y = geometry.at(1).toInt();
-    const int w = geometry.at(2).toInt();
-    const int h = geometry.at(3).toInt();
+    const QString geoDeltaArg = QStringLiteral("--geodelta");
+    const int geoDeltaArgPos = this->arguments().indexOf(geoDeltaArg);
+    const int geoDelta = qBound(0, geoDeltaArgPos >= 0 && this->arguments().size() >= geoDeltaArgPos+2 ? this->arguments().at(geoDeltaArgPos+1).toInt() : 0, 100);
+
+    const int x = geometry.at(0).toInt() + geoDelta;
+    const int y = geometry.at(1).toInt() + geoDelta;
+    const int w = geometry.at(2).toInt() + geoDelta;
+    const int h = geometry.at(3).toInt() + geoDelta;
     QRect geo(x, y, w, h);
     if(!screenGeo.contains(geo))
     {
@@ -1048,6 +1098,55 @@ bool Application::restoreWindowGeometry(QWindow *window, const QString &group)
 
     window->setGeometry(geo);
     return true;
+}
+
+void Application::launchNewInstance(QWindow *window)
+{
+    const QString appPath = this->applicationFilePath();
+    if(window != nullptr)
+    {
+        const QRect geometry = window->geometry();
+        QProcess::startDetached(appPath, QStringList() << QStringLiteral("--windowGeometry") <<
+                                QString::number(geometry.x()+30) << QString::number(geometry.y()+30) <<
+                                QString::number(geometry.width()) << QString::number(geometry.height()));
+    }
+    else
+        QProcess::startDetached(appPath, QStringList() << QStringLiteral("--geodelta") << QStringLiteral("30"));
+}
+
+void Application::toggleFullscreen(QWindow *window)
+{
+    const char *propName = "#previouslyMaximised";
+    if(window->windowStates() & Qt::WindowFullScreen)
+    {
+        const bool waxMaxed = window->property(propName).toBool();
+        if(waxMaxed)
+            window->showMaximized();
+        else
+            window->showNormal();
+    }
+    else
+    {
+        window->setProperty(propName, window->windowStates().testFlag(Qt::WindowMaximized));
+        window->showFullScreen();
+    }
+}
+
+bool Application::resetObjectProperty(QObject *object, const QString &propName)
+{
+    if(object == nullptr || propName.isEmpty())
+        return false;
+
+    const QMetaObject *mo = object->metaObject();
+    const int propIndex = mo->indexOfProperty(qPrintable(propName));
+    if(propIndex < 0)
+        return false;
+
+    const QMetaProperty prop = mo->property(propIndex);
+    if(!prop.isResettable())
+        return false;
+
+    return prop.reset(object);
 }
 
 void Application::initializeStandardColors(QQmlEngine *)

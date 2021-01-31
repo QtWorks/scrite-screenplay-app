@@ -566,7 +566,6 @@ bool QTextDocumentPagedPrinter::print(QTextDocument *document, QPagedPaintDevice
     // All done!
     m_header->finish();
     m_footer->finish();
-
     m_progressReport->finish();
 
     return true;
@@ -636,13 +635,13 @@ void QTextDocumentPagedPrinter::printPageContents(int pageNr, int pageCount, QPa
     painter->save();
 
     painter->translate(body.left(), body.top() - (pageNr - 1) * body.height());
-    QRectF view(0, (pageNr - 1) * body.height(), body.width(), body.height());
+    const QRectF pageRect(0, (pageNr - 1) * body.height(), body.width(), body.height());
 
     QAbstractTextDocumentLayout *layout = doc->documentLayout();
     QAbstractTextDocumentLayout::PaintContext ctx;
 
-    painter->setClipRect(view);
-    ctx.clip = view;
+    painter->setClipRect(pageRect);
+    ctx.clip = pageRect;
     ctx.palette.setColor(QPalette::Text, Qt::black);
     layout->draw(painter, ctx);
 
@@ -664,3 +663,4 @@ void QTextDocumentPagedPrinter::printHeaderFooterWatermark(int pageNr, int pageC
     painter->drawLine(QLineF(body.left(), m_footerRect.top(), body.right(), m_footerRect.top()));
 #endif
 }
+

@@ -14,6 +14,7 @@
 #include "undoredo.h"
 #include "structure.h"
 #include "application.h"
+#include "timeprofiler.h"
 #include "scritedocument.h"
 #include "garbagecollector.h"
 
@@ -23,6 +24,7 @@
 #include <QDateTime>
 #include <QClipboard>
 #include <QJsonDocument>
+#include <QStandardPaths>
 
 StructureElement::StructureElement(QObject *parent)
     : QObject(parent),
@@ -37,6 +39,11 @@ StructureElement::StructureElement(QObject *parent)
     connect(this, &StructureElement::yChanged, this, &StructureElement::yfChanged);
     connect(this, &StructureElement::widthChanged, this, &StructureElement::elementChanged);
     connect(this, &StructureElement::heightChanged, this, &StructureElement::elementChanged);
+
+    connect(this, &StructureElement::xChanged, this, &StructureElement::geometryChanged);
+    connect(this, &StructureElement::yChanged, this, &StructureElement::geometryChanged);
+    connect(this, &StructureElement::widthChanged, this, &StructureElement::geometryChanged);
+    connect(this, &StructureElement::heightChanged, this, &StructureElement::geometryChanged);
 
     if(m_structure)
     {
@@ -329,7 +336,6 @@ void Relationship::addNote(Note *ptr)
         return;
 
     ptr->setParent(this);
-
     connect(ptr, &Note::aboutToDelete, this, &Relationship::removeNote);
     connect(ptr, &Note::noteChanged, this, &Relationship::relationshipChanged);
 
@@ -361,6 +367,22 @@ Note *Relationship::noteAt(int index) const
     return index < 0 || index >= m_notes.size() ? nullptr : m_notes.at(index);
 }
 
+void Relationship::setNotes(const QList<Note *> &list)
+{
+    if(!m_notes.isEmpty() || list.isEmpty())
+        return;
+
+    for(Note *ptr : list)
+    {
+        ptr->setParent(this);
+        connect(ptr, &Note::aboutToDelete, this, &Relationship::removeNote);
+        connect(ptr, &Note::noteChanged, this, &Relationship::relationshipChanged);
+    }
+
+    m_notes.assign(list);
+    emit noteCountChanged();
+}
+
 void Relationship::clearNotes()
 {
     while(m_notes.size())
@@ -377,6 +399,23 @@ void Relationship::serializeToJson(QJsonObject &json) const
 void Relationship::deserializeFromJson(const QJsonObject &json)
 {
     m_withName = json.value("with").toString();
+}
+
+bool Relationship::canSetPropertyFromObjectList(const QString &propName) const
+{
+    if(propName == QStringLiteral("notes"))
+        return m_notes.isEmpty();
+
+    return false;
+}
+
+void Relationship::setPropertyFromObjectList(const QString &propName, const QList<QObject *> &objects)
+{
+    if(propName == QStringLiteral("notes"))
+    {
+        this->setNotes(qobject_list_cast<Note*>(objects));
+        return;
+    }
 }
 
 void Relationship::resolveRelationship()
@@ -540,6 +579,22 @@ void Character::removeNote(Note *ptr)
 Note *Character::noteAt(int index) const
 {
     return index < 0 || index >= m_notes.size() ? nullptr : m_notes.at(index);
+}
+
+void Character::setNotes(const QList<Note *> &list)
+{
+    if(!m_notes.isEmpty() || list.isEmpty())
+        return;
+
+    for(Note *ptr : list)
+    {
+        ptr->setParent(this);
+        connect(ptr, &Note::aboutToDelete, this, &Character::removeNote);
+        connect(ptr, &Note::noteChanged, this, &Character::characterChanged);
+    }
+
+    m_notes.assign(list);
+    emit noteCountChanged();
 }
 
 void Character::clearNotes()
@@ -733,6 +788,23 @@ Relationship *Character::relationshipAt(int index) const
     return index < 0 || index >= m_relationships.size() ? nullptr : m_relationships.at(index);
 }
 
+void Character::setRelationships(const QList<Relationship *> &list)
+{
+    if(!m_relationships.isEmpty() || list.isEmpty())
+        return;
+
+    for(Relationship *ptr : list)
+    {
+        ptr->setParent(this);
+
+        connect(ptr, &Relationship::aboutToDelete, this, &Character::removeRelationship);
+        connect(ptr, &Relationship::relationshipChanged, this, &Character::characterChanged);
+    }
+
+    m_relationships.assign(list);
+    emit relationshipCountChanged();
+}
+
 void Character::clearRelationships()
 {
     while(m_relationships.size())
@@ -889,6 +961,32 @@ void Character::deserializeFromJson(const QJsonObject &json)
     }
 }
 
+bool Character::canSetPropertyFromObjectList(const QString &propName) const
+{
+    if(propName == QStringLiteral("notes"))
+        return m_notes.isEmpty();
+
+    if(propName == QStringLiteral("relationships"))
+        return m_relationships.isEmpty();
+
+    return false;
+}
+
+void Character::setPropertyFromObjectList(const QString &propName, const QList<QObject *> &objects)
+{
+    if(propName == QStringLiteral("notes"))
+    {
+        this->setNotes(qobject_list_cast<Note*>(objects));
+        return;
+    }
+
+    if(propName == QStringLiteral("relationships"))
+    {
+        this->setRelationships(qobject_list_cast<Relationship*>(objects));
+        return;
+    }
+}
+
 void Character::resolveRelationships()
 {
     Q_FOREACH(Relationship *rel, m_relationships.list())
@@ -974,6 +1072,99 @@ int Character::staticRelationshipCount(QQmlListProperty<Relationship> *list)
 
 ///////////////////////////////////////////////////////////////////////////////
 
+class AnnotationMetaData
+{
+public:
+    AnnotationMetaData();
+    ~AnnotationMetaData();
+
+    QJsonArray get(const QString &type);
+    bool update(const QString &type, const QJsonObject &attributes);
+
+private:
+    void save();
+
+private:
+    QJsonObject m_metaData;
+    QString m_metaDataFile;
+};
+
+AnnotationMetaData::AnnotationMetaData()
+{
+    const QString qrcFileName = QStringLiteral(":/misc/annotations_metadata.json");
+    const QString revisionKey = QStringLiteral("#revision");
+    m_metaDataFile = QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).absoluteFilePath( QStringLiteral("annotations_metadata.json") );
+
+    auto loadMetaData = [](const QString &fileName) {
+        QFile file(fileName);
+        if( !file.open(QFile::ReadOnly) )
+            return QJsonObject();
+        return QJsonDocument::fromJson(file.readAll()).object();
+    };
+
+    const QJsonObject qrcMetaData = loadMetaData(qrcFileName);
+    const QJsonObject diskMetaData = loadMetaData(m_metaDataFile);
+    const int qrcRevision = qrcMetaData.value(revisionKey).toInt();
+    const int diskRevision = diskMetaData.value(revisionKey).toInt();
+
+    if(qrcRevision > diskRevision)
+    {
+        // TODO: see if it is possible to merge changes from the qrcFile into the diskFile
+        m_metaData = qrcMetaData;
+        this->save();
+    }
+    else
+        m_metaData = diskMetaData;
+}
+
+AnnotationMetaData::~AnnotationMetaData()
+{
+    this->save();
+}
+
+QJsonArray AnnotationMetaData::get(const QString &type)
+{
+    const QJsonArray info = m_metaData.value(type).toArray();
+    return info;
+}
+
+bool AnnotationMetaData::update(const QString &type, const QJsonObject &attributes)
+{
+    QJsonArray info = m_metaData.value(type).toArray();
+    if(info.isEmpty())
+        return false;
+
+    for(int i=0; i<info.size(); i++)
+    {
+        QJsonObject attrInfo = info.at(i).toObject();
+        if(attrInfo.value(QStringLiteral("cache")).toBool() == false)
+            continue;
+
+        const QString attrName = attrInfo.value(QStringLiteral("name")).toString();
+        const QJsonValue attrValue = attributes.value(attrName);
+        if(attrValue.isNull() || attrValue.isUndefined())
+            continue;
+
+        attrInfo.insert(QStringLiteral("default"), attrValue);
+        info[i] = attrInfo;
+    }
+
+    m_metaData.insert(type, info);
+
+    this->save();
+
+    return true;
+}
+
+void AnnotationMetaData::save()
+{
+    QFile file(m_metaDataFile);
+    file.open(QFile::WriteOnly);
+    file.write( QJsonDocument(m_metaData).toJson() );
+}
+
+Q_GLOBAL_STATIC(AnnotationMetaData, GlobalAnnotationMetaData)
+
 Annotation::Annotation(QObject *parent)
     : QObject(parent),
       m_structure(qobject_cast<Structure*>(parent))
@@ -997,15 +1188,7 @@ void Annotation::setType(const QString &val)
     m_type = val;
     emit typeChanged();
 
-    static QJsonObject metaDataDict;
-    if(metaDataDict.isEmpty())
-    {
-        QFile file(":/misc/annotations_metadata.json");
-        file.open(QFile::ReadOnly);
-        metaDataDict = QJsonDocument::fromJson(file.readAll()).object();
-    }
-
-    const QJsonArray metaData = metaDataDict.value(m_type).toArray();
+    const QJsonArray metaData = ::GlobalAnnotationMetaData->get(m_type);
     this->setMetaData(metaData);
 }
 
@@ -1038,7 +1221,7 @@ void Annotation::setGeometry(const QRectF &val)
     if(m_geometry == val2)
         return;
 
-    m_geometry = val;
+    m_geometry = val2;
     emit geometryChanged();
 }
 
@@ -1055,6 +1238,23 @@ void Annotation::setAttributes(const QJsonObject &val)
     m_attributes = val;
     this->polishAttributes();
     emit attributesChanged();
+}
+
+void Annotation::setAttribute(const QString &key, const QJsonValue &value)
+{
+    m_attributes.insert(key, value);
+    emit attributesChanged();
+}
+
+void Annotation::removeAttribute(const QString &key)
+{
+    m_attributes.remove(key);
+    emit attributesChanged();
+}
+
+void Annotation::saveAttributesAsDefault()
+{
+    ::GlobalAnnotationMetaData->update(m_type, m_attributes);
 }
 
 void Annotation::setMetaData(const QJsonArray &val)
@@ -1192,14 +1392,33 @@ Structure::Structure(QObject *parent)
       m_locationHeadingsMapTimer("Structure.m_locationHeadingsMapTimer")
 {
     connect(this, &Structure::noteCountChanged, this, &Structure::structureChanged);
-    connect(this, &Structure::characterCountChanged, this, &Structure::structureChanged);
+    connect(this, &Structure::zoomLevelChanged, this, &Structure::structureChanged);
     connect(this, &Structure::elementCountChanged, this, &Structure::structureChanged);
+    connect(this, &Structure::characterCountChanged, this, &Structure::structureChanged);
     connect(this, &Structure::annotationCountChanged, this, &Structure::structureChanged);
     connect(this, &Structure::currentElementIndexChanged, this, &Structure::structureChanged);
     connect(this, &Structure::characterRelationshipGraphChanged, this, &Structure::structureChanged);
 
     QClipboard *clipboard = qApp->clipboard();
     connect(clipboard, &QClipboard::dataChanged, this, &Structure::onClipboardDataChanged);
+
+    m_elementsBoundingBoxAggregator.setModel(&m_elements);
+    m_elementsBoundingBoxAggregator.setAggregateFunction([=](const QModelIndex &index, QVariant &value) {
+        QRectF rect = value.toRectF();
+        const StructureElement *element = m_elements.at(index.row());
+        rect |= element->geometry();
+        value = rect;
+    });
+    connect(&m_elementsBoundingBoxAggregator, &ModelAggregator::aggregateValueChanged, this, &Structure::elementsBoundingBoxChanged);
+
+    m_annotationsBoundingBoxAggregator.setModel(&m_annotations);
+    m_annotationsBoundingBoxAggregator.setAggregateFunction([=](const QModelIndex &index, QVariant &value) {
+        QRectF rect = value.toRectF();
+        const Annotation *annot = m_annotations.at(index.row());
+        rect |= annot->geometry();
+        value = rect;
+    });
+    connect(&m_annotationsBoundingBoxAggregator, &ModelAggregator::aggregateValueChanged, this, &Structure::annotationsBoundingBoxChanged);
 }
 
 Structure::~Structure()
@@ -1232,6 +1451,15 @@ void Structure::setCanvasGridSize(qreal val)
 
     m_canvasGridSize = val;
     emit canvasGridSizeChanged();
+}
+
+void Structure::setCanvasUIMode(Structure::CanvasUIMode val)
+{
+    if(m_canvasUIMode == val)
+        return;
+
+    m_canvasUIMode = val;
+    emit canvasUIModeChanged();
 }
 
 qreal Structure::snapToGrid(qreal val) const
@@ -1310,6 +1538,36 @@ void Structure::removeCharacter(Character *ptr)
 Character *Structure::characterAt(int index) const
 {
     return index < 0 || index >= m_characters.size() ? nullptr : m_characters.at(index);
+}
+
+void Structure::setCharacters(const QList<Character *> &list)
+{
+    if(!m_characters.isEmpty() || list.isEmpty())
+        return;
+
+    // We dont have to capture this as an undoable action, because this method
+    // is only called as a part of loading the Structure. What's the point in
+    // undoing a Structure loaded from file.
+
+    QList<Character*> list2;
+    list2.reserve(list.size());
+
+    for(Character *ptr : list)
+    {
+        if(!ptr->isValid() || this->findCharacter(ptr->name()) != nullptr)
+        {
+            GarbageCollector::instance()->add(ptr);
+            continue;
+        }
+
+        ptr->setParent(this);
+        connect(ptr, &Character::aboutToDelete, this, &Structure::removeCharacter);
+        connect(ptr, &Character::characterChanged, this, &Structure::structureChanged);
+        list2.append(ptr);
+    }
+
+    m_characters.assign(list2);
+    emit characterCountChanged();
 }
 
 void Structure::clearCharacters()
@@ -1435,6 +1693,26 @@ Note *Structure::noteAt(int index) const
     return index < 0 || index >= m_notes.size() ? nullptr : m_notes.at(index);
 }
 
+void Structure::setNotes(const QList<Note *> &list)
+{
+    if(!m_notes.isEmpty() || list.isEmpty())
+        return;
+
+    // We dont have to capture this as an undoable action, because this method
+    // is only called as a part of loading the Structure. What's the point in
+    // undoing a Structure loaded from file.
+
+    for(Note *ptr : list)
+    {
+        ptr->setParent(this);
+        connect(ptr, &Note::aboutToDelete, this, &Structure::removeNote);
+        connect(ptr, &Note::noteChanged, this, &Structure::structureChanged);
+    }
+
+    m_notes.assign(list);
+    emit noteCountChanged();
+}
+
 void Structure::clearNotes()
 {
     while(m_notes.size())
@@ -1519,6 +1797,8 @@ void Structure::insertElement(StructureElement *ptr, int index)
     connect(ptr, &StructureElement::elementChanged, this, &Structure::structureChanged);
     connect(ptr, &StructureElement::aboutToDelete, this, &Structure::removeElement);
     connect(ptr, &StructureElement::sceneLocationChanged, this, &Structure::updateLocationHeadingMapLater);
+    connect(ptr, &StructureElement::geometryChanged, &m_elements, &ObjectListPropertyModel<StructureElement*>::objectChanged);
+    connect(ptr, &StructureElement::aboutToDelete, &m_elements, &ObjectListPropertyModel<StructureElement*>::objectDestroyed);
     this->updateLocationHeadingMapLater();
 
     this->onStructureElementSceneChanged(ptr);
@@ -1546,6 +1826,33 @@ void Structure::moveElement(StructureElement *ptr, int toRow)
     emit elementsChanged();
 
     this->resetCurentElementIndex();
+}
+
+void Structure::setElements(const QList<StructureElement *> &list)
+{
+    if(!m_elements.isEmpty() || list.isEmpty())
+        return;
+
+    // We dont have to capture this as an undoable action, because this method
+    // is only called as a part of loading the Structure. What's the point in
+    // undoing a Structure loaded from file.
+
+    for(StructureElement *element : list)
+    {
+        element->setParent(this);
+
+        connect(element, &StructureElement::elementChanged, this, &Structure::structureChanged);
+        connect(element, &StructureElement::aboutToDelete, this, &Structure::removeElement);
+        connect(element, &StructureElement::sceneLocationChanged, this, &Structure::updateLocationHeadingMapLater);
+        connect(element, &StructureElement::geometryChanged, &m_elements, &ObjectListPropertyModel<StructureElement*>::objectChanged);
+        connect(element, &StructureElement::aboutToDelete, &m_elements, &ObjectListPropertyModel<StructureElement*>::objectDestroyed);
+        this->onStructureElementSceneChanged(element);
+    }
+
+    m_elements.assign(list);
+    this->setCurrentElementIndex(0);
+    emit elementCountChanged();
+    emit elementsChanged();
 }
 
 StructureElement *Structure::elementAt(int index) const
@@ -1622,10 +1929,10 @@ QRectF Structure::layoutElements(Structure::LayoutType layoutType)
     Q_FOREACH(StructureElement *element, elementsToLayout)
         oldBoundingRect |= QRectF(element->x(), element->y(), element->width(), element->height());
 
-    static const qreal verticalLayoutSpacing = 50;
-    static const qreal horizontalLayoutSpacing = 50;
-    static const qreal flowVerticalLayoutSpacing = 20;
-    static const qreal flowHorizontalLayoutSpacing = 20;
+    const qreal verticalLayoutSpacing = m_canvasUIMode == IndexCardUI ? 100 : 50;
+    const qreal horizontalLayoutSpacing = verticalLayoutSpacing;
+    const qreal flowVerticalLayoutSpacing = m_canvasUIMode == IndexCardUI ? 100 : 20;
+    const qreal flowHorizontalLayoutSpacing = flowVerticalLayoutSpacing;
 
     int direction = 1;
     QRectF elementRect;
@@ -1704,6 +2011,205 @@ QRectF Structure::layoutElements(Structure::LayoutType layoutType)
     }
 
     return newBoundingRect;
+}
+
+void Structure::setForceBeatBoardLayout(bool val)
+{
+    if(m_forceBeatBoardLayout == val)
+        return;
+
+    m_forceBeatBoardLayout = val;
+    if(val && ScriteDocument::instance()->structure() == this)
+        this->placeElementsInBeatBoardLayout(ScriteDocument::instance()->screenplay());
+
+    emit forceBeatBoardLayoutChanged();
+}
+
+void Structure::placeElement(StructureElement *element, Screenplay *screenplay) const
+{
+    if(m_elements.isEmpty() || element == nullptr || m_elements.indexOf(element) < 0)
+        return;
+
+    const qreal x = 5000;
+    const qreal y = 5000;
+    const qreal xSpacing = 100;
+    const qreal ySpacing = 150;
+    const qreal elementWidthHint = 350;
+    const qreal elementHeightHint = 375;
+
+    if(m_elements.size() == 1)
+    {
+        element->setX(x);
+        element->setY(y);
+        return;
+    }
+
+    auto evaluateBoundingRect = [=]() {
+        QRectF ret;
+        for(StructureElement *e : m_elements.list()) {
+            if(e == element)
+                continue;
+            const qreal ew = qFuzzyIsNull(e->width()) ? elementWidthHint : e->width();
+            const qreal eh = qFuzzyIsNull(e->height()) ? elementHeightHint : e->height();
+            ret |= QRectF(e->x(), e->y(), ew, eh);
+        }
+        return ret;
+    };
+
+    if(screenplay == nullptr)
+    {
+        const QRectF boundingRect = evaluateBoundingRect();
+        element->setX(boundingRect.right() + xSpacing);
+        element->setY(boundingRect.top());
+        return;
+    }
+
+    if(m_forceBeatBoardLayout)
+    {
+        this->placeElementsInBeatBoardLayout(screenplay);
+        return;
+    }
+
+    const QList< QPair<QString, QList<StructureElement *> > > beats = this->evaluateBeatsImpl(screenplay);
+    for(QPair<QString, QList<StructureElement*> > beat : beats)
+    {
+        const int index = beat.second.indexOf(element);
+        if(index < 0)
+            continue;
+
+        if(index == 0)
+        {
+            if(beat.second.size() == 1)
+            {
+                const QRectF boundingRect = evaluateBoundingRect();
+                element->setX(boundingRect.left());
+                element->setY(boundingRect.bottom() + ySpacing);
+                return;
+            }
+        }
+
+        StructureElement *before = beat.second.at(index-1);
+        if(beat.second.last() == element)
+        {
+            const qreal bw = qFuzzyIsNull(before->width()) ? elementWidthHint : before->width();
+            element->setX(before->x()+bw+xSpacing);
+            element->setY(before->y());
+            return;
+        }
+
+        const qreal bh = qFuzzyIsNull(before->height()) ? elementHeightHint : before->height();
+        element->setX(before->x());
+        element->setY(before->y()+bh+ySpacing/2);
+        return;
+    }
+}
+
+QRectF Structure::placeElementsInBeatBoardLayout(Screenplay *screenplay) const
+{
+    QRectF newBoundingRect;
+
+    if(screenplay == nullptr)
+        return newBoundingRect;
+
+    const QList< QPair<QString, QList<StructureElement *> > > beats = this->evaluateBeatsImpl(screenplay);
+
+    const qreal x = 5000;
+    const qreal y = 5000;
+    const qreal xSpacing = 100;
+    const qreal ySpacing = 150;
+
+    QRectF elementRect(x, y, 0, 0);
+
+    for(QPair<QString, QList<StructureElement*>> beat : beats)
+    {
+        if(beat.second.isEmpty())
+            continue;
+
+        QRectF beatRect;
+        for(StructureElement *element : beat.second)
+        {
+            elementRect.setWidth(element->width());
+            elementRect.setHeight(element->height());
+            beatRect |= elementRect;
+            newBoundingRect |= elementRect;
+
+            element->setPosition(elementRect.topLeft());
+
+            elementRect.moveTopLeft( elementRect.topRight() + QPointF(xSpacing,0) );
+        }
+
+        elementRect.moveTopLeft(QPointF(x, beatRect.bottom()+ySpacing));
+    }
+
+    return newBoundingRect;
+}
+
+QJsonArray Structure::evaluateBeats(Screenplay *screenplay) const
+{
+    QJsonArray ret;
+    const QList< QPair<QString, QList<StructureElement *> > > beats = this->evaluateBeatsImpl(screenplay);
+
+    for(QPair<QString, QList<StructureElement*>> beat : beats)
+    {
+        if(beat.second.isEmpty())
+            continue;
+
+        QJsonArray sceneIds;
+
+        QRectF beatBox;
+        for(StructureElement *element : beat.second)
+        {
+            beatBox |= QRectF(element->x(), element->y(), element->width(), element->height());
+            sceneIds.append( element->scene()->id() );
+        }
+
+        QJsonObject beatJson;
+        beatJson.insert("name", beat.first);
+        beatJson.insert("sceneIds", sceneIds);
+        beatJson.insert("sceneCount", sceneIds.size());
+
+        QJsonObject beatGeo;
+        beatGeo.insert("x", beatBox.x());
+        beatGeo.insert("y", beatBox.y());
+        beatGeo.insert("width", beatBox.width());
+        beatGeo.insert("height", beatBox.height());
+        beatJson.insert("geometry", beatGeo);
+
+        ret.append(beatJson);
+    }
+
+    return ret;
+}
+
+QList< QPair<QString, QList<StructureElement *> > > Structure::evaluateBeatsImpl(Screenplay *screenplay) const
+{
+    QList< QPair<QString, QList<StructureElement *> > > ret;
+    if(screenplay == nullptr)
+        return ret;
+
+    ret.append( qMakePair(QStringLiteral("Opening Act"), QList<StructureElement*>()) );
+
+    for(int i=0; i<screenplay->elementCount(); i++)
+    {
+        ScreenplayElement *element = screenplay->elementAt(i);
+        if(element->elementType() == ScreenplayElement::BreakElementType)
+        {
+            if(i == 0)
+                ret.last().first = element->breakTitle();
+            else
+                ret.append( qMakePair(element->breakTitle(), QList<StructureElement*>()) );
+        }
+        else
+        {
+            Scene *scene = element->scene();
+            int index = this->indexOfScene(scene);
+            StructureElement *selement = this->elementAt(index);
+            if(selement != nullptr)
+                ret.last().second.append(selement);
+        }
+    }
+
+    return ret;
 }
 
 void Structure::scanForMuteCharacters()
@@ -1785,6 +2291,8 @@ void Structure::addAnnotation(Annotation *ptr)
     ptr->setParent(this);
     connect(ptr, &Annotation::aboutToDelete, this, &Structure::removeAnnotation);
     connect(ptr, &Annotation::annotationChanged, this, &Structure::structureChanged);
+    connect(ptr, &Annotation::geometryChanged, &m_annotations, &ObjectListPropertyModel<Annotation*>::objectChanged);
+    connect(ptr, &Annotation::aboutToDelete, &m_annotations, &ObjectListPropertyModel<Annotation*>::objectDestroyed);
 
     emit annotationCountChanged();
 }
@@ -1855,13 +2363,42 @@ void Structure::sendToBack(Annotation *ptr)
     m_annotations.takeAt(index);
     m_annotations.prepend(ptr);
     emit annotationCountChanged(); // Although the count did not change, we use the same
-                                   // signal to announce change in the annotations list property
+    // signal to announce change in the annotations list property
+}
+
+void Structure::setAnnotations(const QList<Annotation *> &list)
+{
+    if(!m_annotations.isEmpty() || list.isEmpty())
+        return;
+
+    // We dont have to capture this as an undoable action, because this method
+    // is only called as a part of loading the Structure. What's the point in
+    // undoing a Structure loaded from file.
+
+    for(Annotation *ptr : list)
+    {
+        ptr->setParent(this);
+        connect(ptr, &Annotation::aboutToDelete, this, &Structure::removeAnnotation);
+        connect(ptr, &Annotation::annotationChanged, this, &Structure::structureChanged);
+        connect(ptr, &Annotation::geometryChanged, &m_annotations, &ObjectListPropertyModel<Annotation*>::objectChanged);
+        connect(ptr, &Annotation::aboutToDelete, &m_annotations, &ObjectListPropertyModel<Annotation*>::objectDestroyed);
+    }
+
+    m_annotations.assign(list);
+    emit annotationCountChanged();
 }
 
 void Structure::clearAnnotations()
 {
     while(m_annotations.size())
         this->removeAnnotation(m_annotations.first());
+}
+
+Annotation *Structure::createAnnotation(const QString &type)
+{
+    Annotation *ret = new Annotation(this);
+    ret->setType(type);
+    return ret;
 }
 
 void Structure::copy(QObject *elementOrAnnotation)
@@ -2050,6 +2587,41 @@ void Structure::deserializeFromJson(const QJsonObject &)
                 }
             }
         }
+    }
+}
+
+bool Structure::canSetPropertyFromObjectList(const QString &propName) const
+{
+    if(propName == QStringLiteral("elements"))
+        return m_elements.isEmpty();
+
+    if(propName == QStringLiteral("characters"))
+        return m_characters.isEmpty();
+
+    if(propName == QStringLiteral("notes"))
+        return m_notes.isEmpty();
+
+    return false;
+}
+
+void Structure::setPropertyFromObjectList(const QString &propName, const QList<QObject *> &objects)
+{
+    if(propName == QStringLiteral("elements"))
+    {
+        this->setElements(qobject_list_cast<StructureElement*>(objects));
+        return;
+    }
+
+    if(propName == QStringLiteral("characters"))
+    {
+        this->setCharacters(qobject_list_cast<Character*>(objects));
+        return;
+    }
+
+    if(propName == QStringLiteral("notes"))
+    {
+        this->setNotes(qobject_list_cast<Note*>(objects));
+        return;
     }
 }
 
@@ -2385,7 +2957,7 @@ QPainterPath StructureElementConnector::shape() const
         return path;
 
     auto getElementRect = [](StructureElement *e) {
-        QRectF r(e->x(), e->y(), e->width(), e->height());
+        QRectF r(e->x(), e->y(), e->width(), qMin(e->height(),100.0));
         // r.moveCenter(QPointF(e->x(), e->y()));
         return r;
     };
@@ -2607,3 +3179,233 @@ void StructureElementConnector::setSuggestedLabelPosition(const QPointF &val)
     m_suggestedLabelPosition = val;
     emit suggestedLabelPositionChanged();
 }
+
+///////////////////////////////////////////////////////////////////////////////
+
+StructureCanvasViewportFilterModel::StructureCanvasViewportFilterModel(QObject *parent)
+    : QSortFilterProxyModel(parent),
+      m_structure(this, "structure")
+{
+
+}
+
+StructureCanvasViewportFilterModel::~StructureCanvasViewportFilterModel()
+{
+
+}
+
+void StructureCanvasViewportFilterModel::setStructure(Structure *val)
+{
+    if(m_structure == val)
+        return;
+
+    m_structure = val;
+    this->updateSourceModel();
+    emit structureChanged();
+}
+
+void StructureCanvasViewportFilterModel::setEnabled(bool val)
+{
+    if(m_enabled == val)
+        return;
+
+    m_enabled = val;
+    emit enabledChanged();
+
+    this->invalidateSelfLater();
+}
+
+void StructureCanvasViewportFilterModel::setType(StructureCanvasViewportFilterModel::Type val)
+{
+    if(m_type == val)
+        return;
+
+    m_type = val;
+    emit typeChanged();
+
+    this->updateSourceModel();
+}
+
+void StructureCanvasViewportFilterModel::setViewportRect(const QRectF &val)
+{
+    if(m_viewportRect == val)
+        return;
+
+    m_viewportRect = val;
+    emit viewportRectChanged();
+
+    this->invalidateSelfLater();
+}
+
+void StructureCanvasViewportFilterModel::setComputeStrategy(StructureCanvasViewportFilterModel::ComputeStrategy val)
+{
+    if(m_computeStrategy == val)
+        return;
+
+    m_computeStrategy = val;
+    emit computeStrategyChanged();
+}
+
+void StructureCanvasViewportFilterModel::setFilterStrategy(StructureCanvasViewportFilterModel::FilterStrategy val)
+{
+    if(m_filterStrategy == val)
+        return;
+
+    m_filterStrategy = val;
+    emit filterStrategyChanged();
+
+    this->invalidateSelfLater();
+}
+
+int StructureCanvasViewportFilterModel::mapFromSourceRow(int source_row) const
+{
+    if(this->sourceModel() == nullptr)
+        return source_row;
+
+    const QModelIndex source_index = this->sourceModel()->index(source_row, 0, QModelIndex());
+    const QModelIndex filter_index = this->mapFromSource(source_index);
+    return filter_index.row();
+}
+
+int StructureCanvasViewportFilterModel::mapToSourceRow(int filter_row) const
+{
+    if(this->sourceModel() == nullptr)
+        return filter_row;
+
+    const QModelIndex filter_index = this->index(filter_row, 0, QModelIndex());
+    const QModelIndex source_index = this->mapToSource(filter_index);
+    return source_index.row();
+}
+
+void StructureCanvasViewportFilterModel::setSourceModel(QAbstractItemModel *model)
+{
+    QAbstractItemModel *oldModel = this->sourceModel();
+    if(oldModel != nullptr)
+    {
+        connect(oldModel, &QAbstractItemModel::rowsInserted, this, &StructureCanvasViewportFilterModel::invalidateSelfLater);
+        connect(oldModel, &QAbstractItemModel::rowsRemoved, this, &StructureCanvasViewportFilterModel::invalidateSelfLater);
+        connect(oldModel, &QAbstractItemModel::rowsMoved, this, &StructureCanvasViewportFilterModel::invalidateSelfLater);
+        connect(oldModel, &QAbstractItemModel::dataChanged, this, &StructureCanvasViewportFilterModel::invalidateSelfLater);
+        connect(oldModel, &QAbstractItemModel::modelReset, this, &StructureCanvasViewportFilterModel::invalidateSelfLater);
+    }
+
+    if(m_structure.isNull())
+        this->QSortFilterProxyModel::setSourceModel(nullptr);
+    else
+    {
+        if(m_type == AnnotationType && model == m_structure->annotationsModel())
+            this->QSortFilterProxyModel::setSourceModel(model);
+        else if(model == m_structure->elementsModel())
+            this->QSortFilterProxyModel::setSourceModel(model);
+        else
+            this->QSortFilterProxyModel::setSourceModel(nullptr);
+    }
+
+    connect(model, &QAbstractItemModel::rowsInserted, this, &StructureCanvasViewportFilterModel::invalidateSelfLater);
+    connect(model, &QAbstractItemModel::rowsRemoved, this, &StructureCanvasViewportFilterModel::invalidateSelfLater);
+    connect(model, &QAbstractItemModel::rowsMoved, this, &StructureCanvasViewportFilterModel::invalidateSelfLater);
+    connect(model, &QAbstractItemModel::dataChanged, this, &StructureCanvasViewportFilterModel::invalidateSelfLater);
+    connect(model, &QAbstractItemModel::modelReset, this, &StructureCanvasViewportFilterModel::invalidateSelfLater);
+}
+
+bool StructureCanvasViewportFilterModel::filterAcceptsRow(int source_row, const QModelIndex &source_parent) const
+{
+    Q_UNUSED(source_parent)
+    if(!m_enabled || m_viewportRect.size().isEmpty())
+        return true;
+
+    const ObjectListPropertyModelBase *model = qobject_cast<ObjectListPropertyModelBase*>(this->sourceModel());
+    if(model == nullptr)
+        return true;
+
+    const QObject *object = model->objectAt(source_row);
+    if(m_computeStrategy == PreComputeStrategy)
+    {
+        if(source_row < 0 || source_row >= m_visibleSourceRows.size() || object != m_visibleSourceRows.at(source_row).first)
+        {
+            (const_cast<StructureCanvasViewportFilterModel*>(this))->invalidateSelfLater();
+            return false;
+        }
+
+        return m_visibleSourceRows.at(source_row).second;
+    }
+
+    const QRectF objectRect = (m_type == AnnotationType) ?
+                (qobject_cast<const Annotation*>(object))->geometry() :
+                (qobject_cast<const StructureElement*>(object))->geometry();
+    if(m_filterStrategy == ContainsStrategy)
+        return m_viewportRect.contains(objectRect);
+    return m_viewportRect.intersects(objectRect);
+}
+
+void StructureCanvasViewportFilterModel::timerEvent(QTimerEvent *te)
+{
+    if(te->timerId() == m_invalidateTimer.timerId())
+    {
+        m_invalidateTimer.stop();
+        this->invalidateSelf();
+    }
+    else
+        QObject::timerEvent(te);
+}
+
+void StructureCanvasViewportFilterModel::resetStructure()
+{
+    m_structure = nullptr;
+    this->setSourceModel(nullptr);
+    emit structureChanged();
+}
+
+void StructureCanvasViewportFilterModel::updateSourceModel()
+{
+    if(m_structure.isNull())
+        this->setSourceModel(nullptr);
+    else
+    {
+        if(m_type == AnnotationType)
+            this->setSourceModel(m_structure->annotationsModel());
+        else
+            this->setSourceModel(m_structure->elementsModel());
+    }
+}
+
+void StructureCanvasViewportFilterModel::invalidateSelf()
+{
+    m_visibleSourceRows.clear();
+    const ObjectListPropertyModelBase *model = m_computeStrategy == OnDemandComputeStrategy ? nullptr : qobject_cast<ObjectListPropertyModelBase*>(this->sourceModel());
+    if(model == nullptr || m_computeStrategy == OnDemandComputeStrategy)
+    {
+        this->invalidateFilter();
+        return;
+    }
+
+    m_visibleSourceRows.reserve(model->objectCount());
+    for(int i=0; i<model->objectCount(); i++)
+    {
+        const QObject *object = model->objectAt(i);
+
+        if(m_viewportRect.size().isEmpty())
+            m_visibleSourceRows << qMakePair(object, true);
+        else
+        {
+            const QRectF objectRect = (m_type == AnnotationType) ?
+                        (qobject_cast<const Annotation*>(object))->geometry() :
+                        (qobject_cast<const StructureElement*>(object))->geometry();
+            if(m_filterStrategy == ContainsStrategy)
+                m_visibleSourceRows << qMakePair(object, m_viewportRect.contains(objectRect));
+            else
+                m_visibleSourceRows << qMakePair(object, m_viewportRect.intersects(objectRect));
+        }
+    }
+
+    this->invalidateFilter();
+}
+
+void StructureCanvasViewportFilterModel::invalidateSelfLater()
+{
+    if(m_enabled && m_computeStrategy == PreComputeStrategy)
+        m_invalidateTimer.start(0, this);
+    else
+        m_invalidateTimer.stop();
+}
+

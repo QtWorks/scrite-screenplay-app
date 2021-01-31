@@ -25,15 +25,19 @@ Item {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.margins: 1
         color: primaryColors.c100.background
         height: toolbarLayout.height+4
+        border.width: 1
+        border.color: primaryColors.borderColor
+        radius: 6
 
-        Row {
+        Flow {
             id: toolbarLayout
             spacing: 3
             width: parent.width-4
             anchors.verticalCenter: parent.verticalCenter
+            layoutDirection: Flow.LeftToRight
+            property real rowHeight: newSceneButton.height
 
             ToolButton3 {
                 id: newSceneButton
@@ -59,7 +63,7 @@ Item {
 
             Rectangle {
                 width: 1
-                height: parent.height
+                height: parent.rowHeight
                 color: primaryColors.separatorColor
                 opacity: 0.5
             }
@@ -74,14 +78,14 @@ Item {
             }
 
             ToolButton3 {
-                onClicked: canvasScroll.zoomIn()
+                onClicked: { canvasScroll.zoomIn(); canvasScroll.storeZoomLevel() }
                 iconSource: "../icons/navigation/zoom_in.png"
                 autoRepeat: true
                 ToolTip.text: "Zoom In"
             }
 
             ToolButton3 {
-                onClicked: canvasScroll.zoomOut()
+                onClicked: { canvasScroll.zoomOut(); canvasScroll.storeZoomLevel() }
                 iconSource: "../icons/navigation/zoom_out.png"
                 autoRepeat: true
                 ToolTip.text: "Zoom Out"
@@ -95,10 +99,12 @@ Item {
                             item = elementItems.itemAt(0)
                         if(item === null) {
                             canvasScroll.zoomOneMiddleArea()
+                            canvasScroll.storeZoomLevel()
                             return
                         }
                     }
                     canvasScroll.zoomOneToItem(item)
+                    canvasScroll.storeZoomLevel()
                 }
                 iconSource: "../icons/navigation/zoom_one.png"
                 autoRepeat: true
@@ -106,7 +112,7 @@ Item {
             }
 
             ToolButton3 {
-                onClicked: canvasScroll.zoomFit(canvasItemsBoundingBox.boundingBox)
+                onClicked: { canvasScroll.zoomFit(canvasItemsBoundingBox.boundingBox); canvasScroll.storeZoomLevel() }
                 iconSource: "../icons/navigation/zoom_fit.png"
                 autoRepeat: true
                 ToolTip.text: "Zoom Fit"
@@ -114,7 +120,7 @@ Item {
 
             Rectangle {
                 width: 1
-                height: parent.height
+                height: parent.rowHeight
                 color: primaryColors.separatorColor
                 opacity: 0.5
             }
@@ -163,9 +169,19 @@ Item {
                 onClicked: selection.layout(Structure.FlowVerticalLayout)
             }
 
+            ToolButton3 {
+                enabled: !scriteDocument.readOnly && scriteDocument.screenplay.elementCount > 0
+                iconSource: "../icons/action/layout_beat_sheet.png"
+                ToolTip.text: "Beat Board Layout"
+                onClicked: {
+                    var rect = scriteDocument.structure.placeElementsInBeatBoardLayout(scriteDocument.screenplay)
+                    canvasScroll.zoomFit(rect)
+                }
+            }
+
             Rectangle {
                 width: 1
-                height: parent.height
+                height: parent.rowHeight
                 color: primaryColors.separatorColor
                 opacity: 0.5
             }
@@ -256,6 +272,17 @@ Item {
                                            visibleArea.widthRatio * contentWidth / canvas.scale,
                                            visibleArea.heightRatio * contentHeight / canvas.scale )
 
+        onZoomScaleChangedInteractively: storeZoomLevel()
+
+        Connections {
+            target: mainTabBar
+            onCurrentIndexChanged: canvasScroll.storeZoomLevel()
+        }
+
+        function storeZoomLevel() {
+            scriteDocument.structure.zoomLevel = suggestedScale
+        }
+
         function zoomOneMiddleArea() {
             var middleArea = Qt.rect((canvas.width-canvasScroll.width)/2,
                                      (canvas.height-canvasScroll.height)/2,
@@ -285,11 +312,16 @@ Item {
             scale: canvasScroll.suggestedScale
             border.width: 2
             border.color: structureCanvasSettings.gridColor
-            gridIsVisible: structureCanvasSettings.showGrid
+            gridIsVisible: structureCanvasSettings.showGrid && canvasScroll.interactive
             majorTickColor: structureCanvasSettings.gridColor
             minorTickColor: structureCanvasSettings.gridColor
             tickDistance: scriteDocument.structure.canvasGridSize
             transformOrigin: Item.TopLeft
+            backgroundColor: canvasScroll.interactive ? primaryColors.c10.background : app.translucent(primaryColors.c300.background, 0.75)
+            Behavior on backgroundColor {
+                enabled: screenplayEditorSettings.enableAnimations
+                ColorAnimation { duration: 250 }
+            }
 
             function createItem(what, where) {
                 if(scriteDocument.readOnly)
@@ -314,7 +346,7 @@ Item {
                 element.scene.color = c
                 scriteDocument.structure.addElement(element)
                 scriteDocument.structure.currentElementIndex = scriteDocument.structure.elementCount-1
-                requestEditor()
+                requestEditorLater()
                 element.scene.undoRedoEnabled = true
             }
 
@@ -357,8 +389,9 @@ Item {
                 }
             }
 
-            TightBoundingBoxEvaluator {
+            BoundingBoxEvaluator {
                 id: canvasItemsBoundingBox
+                initialRect: scriteDocument.structure.annotationsBoundingBox
             }
 
             DelayedPropertyBinder {
@@ -393,14 +426,15 @@ Item {
                 }
 
                 onClicked: {
-                    if(!scriteDocument.readOnly) {
-                        var where = Qt.point(mouse.x, mouse.y)
-                        if(what === "element")
-                            where = Qt.point(mouse.x-130, mouse.y-22)
-                        canvas.createItem(what, where)
-                    }
+                    var _what = what
                     what = ""
                     enabled = false
+                    if(!scriteDocument.readOnly) {
+                        var where = Qt.point(mouse.x, mouse.y)
+                        if(_what === "element")
+                            where = Qt.point(mouse.x-130, mouse.y-22)
+                        canvas.createItem(_what, where)
+                    }
                 }
             }
 
@@ -421,12 +455,29 @@ Item {
                     onClicked: annotationGripLoader.reset()
                 }
 
+                StructureCanvasViewportFilterModel {
+                    id: annotationsFilterModel
+                    enabled: scriteDocument.loading ? false : scriteDocument.structure.annotationCount > 100
+                    structure: scriteDocument.structure
+                    type: StructureCanvasViewportFilterModel.AnnotationType
+                    viewportRect: canvasScroll.viewportRect
+                    computeStrategy: StructureCanvasViewportFilterModel.PreComputeStrategy
+                    filterStrategy: StructureCanvasViewportFilterModel.IntersectsStrategy
+                }
+
                 Repeater {
                     id: annotationItems
-                    model: scriteDocument.loading ? 0 : scriteDocument.structure.annotationsModel
+                    model: annotationsFilterModel
                     delegate: Loader {
                         property Annotation annotation: modelData
                         property int annotationIndex: index
+                        active: !annotationsFilterModel.enabled
+                        property bool canvasIsChanging: active ? false :canvasScroll.changing
+                        onCanvasIsChangingChanged: {
+                            if(!canvasIsChanging)
+                                active = true
+                        }
+                        asynchronous: true
                         sourceComponent: {
                             switch(annotation.type) {
                             case "rectangle": return rectangleAnnotationComponent
@@ -538,7 +589,7 @@ Item {
 
             BoxShadow {
                 anchors.fill: currentElementItem
-                visible: currentElementItem !== null && !annotationGripLoader.active
+                visible: currentElementItem !== null && !annotationGripLoader.active && currentElementItem.visible
                 property Item currentElementItem: currentElementItemBinder.get
                 onCurrentElementItemChanged: canvasScroll.ensureItemVisible(currentElementItem, canvas.scale)
                 opacity: canvas.activeFocus && !selection.hasItems ? 1 : 0.25
@@ -588,6 +639,90 @@ Item {
                 }
             }
 
+            property var beats: []
+            Component.onCompleted: app.execLater(canvas, 250, function() {
+                canvas.beats = scriteDocument.structure.evaluateBeats(scriteDocument.screenplay)
+            })
+
+            TrackerPack {
+                delay: 250
+
+                TrackProperty {
+                    target: elementItems
+                    property: "count"
+                }
+
+                TrackSignal {
+                    target: scriteDocument.screenplay
+                    signal: "elementsChanged()"
+                }
+
+                TrackSignal {
+                    target: scriteDocument.screenplay
+                    signal: "breakTitleChanged()"
+                }
+
+                TrackSignal {
+                    target: scriteDocument
+                    signal: "loadingChanged()"
+                }
+
+                TrackSignal {
+                    target: scriteDocument.structure
+                    signal: "structureChanged()"
+                }
+
+                onTracked: {
+                    var beats = scriteDocument.structure.evaluateBeats(scriteDocument.screenplay)
+                    canvas.beats = beats
+                }
+            }
+
+            Repeater {
+                model: canvas.beats
+
+                Rectangle {
+                    x: modelData.geometry.x - 20
+                    y: modelData.geometry.y - 20
+                    width: modelData.geometry.width + 40
+                    height: modelData.geometry.height + 40
+                    radius: 0
+                    color: app.translucent(accentColors.windowColor, 0.1)
+                    border.width: 1
+                    border.color: accentColors.borderColor
+
+                    BoundingBoxItem.evaluator: canvasItemsBoundingBox
+                    BoundingBoxItem.stackOrder: 2.0 + (index/canvas.beats.length)
+                    BoundingBoxItem.livePreview: false
+                    BoundingBoxItem.previewFillColor: Qt.rgba(0,0,0,0)
+                    BoundingBoxItem.previewBorderColor: Qt.rgba(0,0,0,0)
+                    BoundingBoxItem.viewportItem: canvas
+                    BoundingBoxItem.visibilityMode: BoundingBoxItem.VisibleUponViewportIntersection
+                    BoundingBoxItem.viewportRect: canvasScroll.viewportRect
+
+                    Rectangle {
+                        anchors.fill: beatLabel
+                        anchors.margins: -parent.radius
+                        border.width: parent.border.width
+                        border.color: parent.border.color
+                        color: app.translucent(accentColors.windowColor, 0.4)
+                    }
+
+                    Text {
+                        id: beatLabel
+                        text: modelData.name + " (" + modelData.sceneCount + ")"
+                        font.bold: true
+                        font.pointSize: app.idealFontPointSize + 3
+                        anchors.bottom: parent.top
+                        anchors.left: parent.left
+                        anchors.leftMargin: parent.radius*2
+                        anchors.bottomMargin: parent.radius-parent.border.width
+                        padding: 10
+                        color: "black"
+                    }
+                }
+            }
+
             Repeater {
                 id: elementConnectorItems
                 model: scriteDocument.loading ? 0 : scriteDocument.structureElementConnectors
@@ -613,8 +748,8 @@ Item {
 
             Repeater {
                 id: elementItems
-                model: scriteDocument.loading ? 0 : scriteDocument.structure.elementsModel
-                delegate: structureElementDelegate
+                model: scriteDocument.loading ? null : scriteDocument.structure.elementsModel
+                delegate: scriteDocument.structure.canvasUIMode === Structure.IndexCardUI ? structureElementIndexCardUIDelegate : structureElementSynopsisEditorUIDelegate
             }
 
             Selection {
@@ -720,7 +855,8 @@ Item {
                         return
 
                     if(!hasItems) {
-                        scriteDocument.structure.layoutElements(type)
+                        var rect = scriteDocument.structure.layoutElements(type)
+                        canvasScroll.zoomFit(rect)
                         return
                     }
 
@@ -805,12 +941,12 @@ Item {
                     selectedColor: newSceneButton.activeColor
                     enabled: !scriteDocument.readOnly
                     onMenuItemClicked: {
+                        Qt.callLater( function() { canvasMenu.close() } )
                         newSceneButton.activeColor = color
                         if(canvasMenu.isContextMenu)
                             canvas.createItem("element", Qt.point(canvasMenu.x-130,canvasMenu.y-22), newSceneButton.activeColor)
                         else
                             createItemMouseHandler.handle("element")
-                        canvasMenu.close()
                     }
                 }
 
@@ -827,6 +963,7 @@ Item {
                             text: annotationInfo.title
                             enabled: !scriteDocument.readOnly && annotationInfo.what !== ""
                             onClicked: {
+                                Qt.callLater( function() { canvasMenu.close() } )
                                 if(canvasMenu.isContextMenu)
                                     canvas.createItem(annotationInfo.what, Qt.point(canvasMenu.x, canvasMenu.y))
                                 else
@@ -921,6 +1058,8 @@ Item {
         running: !scriteDocument.loading
         repeat: false
         interval: 1000
+        property real storedScale: 1
+
         onTriggered: {
             if(scriteDocument.structure.elementCount > elementItems.count || scriteDocument.structure.annotationCount > annotationItems.count) {
                 Qt.callLater(start)
@@ -932,10 +1071,25 @@ Item {
             } else {
                 var item = currentElementItemBinder.get
                 var bbox = canvasItemsBoundingBox.boundingBox
-                if(item === null)
+                if(item === null) {
+                    if(scriteDocument.structure.zoomLevel != canvasScroll.zoomScale) {
+                        var bboxCenterX = bbox.x + bbox.width/2
+                        var bboxCenterY = bbox.y + bbox.height/2
+                        var newWidth = bbox.width / scriteDocument.structure.zoomLevel
+                        var newHeight = bbox.height / scriteDocument.structure.zoomLevel
+                        bbox = Qt.rect(bboxCenterX - newWidth/2,
+                                       bboxCenterY - newHeight/2,
+                                       newWidth,
+                                       newHeight)
+                    }
                     canvasScroll.zoomFit(bbox)
-                else
-                    canvasScroll.zoomOneToItem(item)
+                } else {
+                    if(scriteDocument.structure.zoomLevel != canvasScroll.zoomScale) {
+                        canvasScroll.zoomScale = scriteDocument.structure.zoomLevel
+                        app.execLater(canvasScroll, 100, function() { canvasScroll.ensureItemVisible(item, canvas.scale) })
+                    } else
+                        canvasScroll.zoomOneToItem(item)
+                }
             }
         }
     }
@@ -981,7 +1135,7 @@ Item {
             opacity: 0.55 * previewArea.opacity
         }
 
-        TightBoundingBoxPreview {
+        BoundingBoxPreview {
             id: previewArea
             anchors.fill: parent
             anchors.margins: 5
@@ -1059,12 +1213,12 @@ Item {
         width: parent.width*0.7
         anchors.centerIn: parent
         active: scriteDocument.structure.elementCount === 0 && scriteDocument.structure.annotationCount === 0
-        sourceComponent: TextArea {
-            readOnly: true
+        sourceComponent: Text {
             wrapMode: Text.WordWrap
             horizontalAlignment: Text.AlignHCenter
             font.pixelSize: 30
             enabled: false
+            color: primaryColors.c600.background
             // renderType: Text.NativeRendering
             text: "Create scenes by clicking on the 'Add Scene' button OR right click to see options."
         }
@@ -1076,7 +1230,7 @@ Item {
         StructureElement {
             objectName: "newElement"
             scene: Scene {
-                title: "New Scene"
+                title: scriteDocument.structure.canvasUIMode === Structure.IndexCardUI ? "" : "New Scene"
                 heading.locationType: "INT"
                 heading.location: "SOMEWHERE"
                 heading.moment: "DAY"
@@ -1084,8 +1238,9 @@ Item {
         }
     }
 
+    // This is the old style structure element delegate, where we were only showing the synopsis.
     Component {
-        id: structureElementDelegate
+        id: structureElementSynopsisEditorUIDelegate
 
         Item {
             id: elementItem
@@ -1093,14 +1248,14 @@ Item {
             Component.onCompleted: element.follow = elementItem
             enabled: selection.active === false
 
-            TightBoundingBoxItem.evaluator: canvasItemsBoundingBox
-            TightBoundingBoxItem.stackOrder: 2.0 + (index/scriteDocument.structure.elementCount)
-            TightBoundingBoxItem.livePreview: false
-            TightBoundingBoxItem.previewFillColor: app.translucent(background.color, 0.5)
-            TightBoundingBoxItem.previewBorderColor: selected ? "black" : background.border.color
-            TightBoundingBoxItem.viewportItem: canvas
-            TightBoundingBoxItem.visibilityMode: TightBoundingBoxItem.VisibleUponViewportIntersection
-            TightBoundingBoxItem.viewportRect: canvasScroll.viewportRect
+            BoundingBoxItem.evaluator: canvasItemsBoundingBox
+            BoundingBoxItem.stackOrder: 3.0 + (index/scriteDocument.structure.elementCount)
+            BoundingBoxItem.livePreview: false
+            BoundingBoxItem.previewFillColor: app.translucent(background.color, 0.5)
+            BoundingBoxItem.previewBorderColor: selected ? "black" : background.border.color
+            BoundingBoxItem.viewportItem: canvas
+            BoundingBoxItem.visibilityMode: BoundingBoxItem.VisibleUponViewportIntersection
+            BoundingBoxItem.viewportRect: canvasScroll.viewportRect
 
             readonly property bool selected: scriteDocument.structure.currentElementIndex === index
             readonly property bool editing: titleText.readOnly === false
@@ -1191,7 +1346,7 @@ Item {
                     annotationGripLoader.reset()
                     canvas.forceActiveFocus()
                     scriteDocument.structure.currentElementIndex = index
-                    requestEditor()
+                    requestEditorLater()
                 }
 
                 drag.target: scriteDocument.readOnly ? null : elementItem
@@ -1287,6 +1442,310 @@ Item {
                         })
                     }
                 }
+            }
+        }
+    }
+
+    // This is the new style structure element delegate, where we are showing index cards like UI
+    // on the structure canvas.
+    Component {
+        id: structureElementIndexCardUIDelegate
+
+        Item {
+            id: elementItem
+            property StructureElement element: modelData
+            property bool selected: scriteDocument.structure.currentElementIndex === index
+            z: selected ? 1 : 0
+
+            function select() {
+                scriteDocument.structure.currentElementIndex = index
+            }
+
+            function activate() {
+                indexCardTabSequence.releaseFocus()
+                annotationGripLoader.reset()
+                canvas.forceActiveFocus()
+                scriteDocument.structure.currentElementIndex = index
+                requestEditorLater()
+            }
+
+            function finishEditing() {
+                if(canvasScroll.editItem === elementItem)
+                    canvasScroll.editItem = null
+                indexCardTabSequence.releaseFocus()
+            }
+
+            Component.onCompleted: element.follow = elementItem
+
+            BoundingBoxItem.evaluator: canvasItemsBoundingBox
+            BoundingBoxItem.stackOrder: 3.0 + (index/scriteDocument.structure.elementCount)
+            BoundingBoxItem.livePreview: false
+            BoundingBoxItem.previewFillColor: background.color
+            BoundingBoxItem.previewBorderColor: selected ? "black" : background.border.color
+            BoundingBoxItem.viewportItem: canvas
+            BoundingBoxItem.visibilityMode: BoundingBoxItem.VisibleUponViewportIntersection
+            BoundingBoxItem.viewportRect: canvasScroll.viewportRect
+
+            x: positionBinder.get.x
+            y: positionBinder.get.y
+            DelayedPropertyBinder {
+                id: positionBinder
+                initial: Qt.point(element.x, element.y)
+                set: element.position
+                onGetChanged: {
+                    elementItem.x = get.x
+                    elementItem.y = get.y
+                }
+            }
+
+            width: 350
+            height: indexCardLayout.height + 20
+
+            Rectangle {
+                id: background
+                anchors.fill: parent
+                color: Qt.tint(element.scene.color, selected ? "#C0FFFFFF" : "#F0FFFFFF")
+                border.width: elementItem.selected ? 2 : 1
+                border.color: (element.scene.color === Qt.rgba(1,1,1,1) ? "gray" : element.scene.color)
+
+                // Move index-card around
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    onClicked: elementItem.activate()
+
+                    drag.target: scriteDocument.readOnly ? null : elementItem
+                    drag.axis: Drag.XAndYAxis
+                    drag.minimumX: 0
+                    drag.minimumY: 0
+                    drag.onActiveChanged: {
+                        canvas.forceActiveFocus()
+                        scriteDocument.structure.currentElementIndex = index
+                        if(drag.active === false) {
+                            elementItem.x = scriteDocument.structure.snapToGrid(elementItem.x)
+                            elementItem.y = scriteDocument.structure.snapToGrid(elementItem.y)
+                        }
+                    }
+                }
+
+                // Context menu support for index card
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.RightButton
+                    onClicked: {
+                        indexCardTabSequence.releaseFocus()
+                        canvas.forceActiveFocus()
+                        elementItem.select()
+                        elementContextMenu.element = elementItem.element
+                        elementContextMenu.popup()
+                    }
+                }
+            }
+
+            TabSequenceManager {
+                id: indexCardTabSequence
+                wrapAround: true
+            }
+
+            property bool focus2: headingField.activeFocus | synopsisField.activeFocus | emotionChangeField.activeFocus | conflictCharsField.activeFocus | pageTargetField.activeFocus
+            onFocus2Changed: {
+                if(focus2)
+                    canvasScroll.editItem = elementItem
+                else if(canvasScroll.editItem === elementItem)
+                    canvasScroll.editItem = null
+            }
+
+            Column {
+                id: indexCardLayout
+                width: parent.width - 20
+                anchors.centerIn: parent
+                spacing: 10
+
+                Rectangle {
+                    width: parent.width
+                    height: 10
+                    color: selected ? element.scene.color : Qt.tint(element.scene.color, "#90FFFFFF")
+                    border.color: (element.scene.color === Qt.rgba(1,1,1,1) ? "gray" : element.scene.color)
+                    border.width: 1
+                }
+
+                TextField2 {
+                    id: headingField
+                    width: parent.width
+                    text: element.scene.heading.text
+                    enabled: element.scene.heading.enabled
+                    label: "Scene Heading"
+                    labelAlwaysVisible: true
+                    placeholderText: enabled ? "INT. SOMEPLACE - DAY" : "NO SCENE HEADING"
+                    font.family: scriteDocument.formatting.defaultFont.family
+                    font.bold: true
+                    font.capitalization: Font.AllUppercase
+                    font.pointSize: app.idealFontPointSize
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    onEditingComplete: element.scene.heading.parseFrom(text)
+                    TabSequenceItem.manager: indexCardTabSequence
+                    TabSequenceItem.sequence: 0
+                    onActiveFocusChanged: if(activeFocus) elementItem.select()
+                    Keys.onEscapePressed: indexCardTabSequence.releaseFocus()
+                }
+
+                TextArea {
+                    id: synopsisField
+                    width: parent.width
+                    background: Item {
+                        Text {
+                            id: labelText
+                            text: "Synopsis"
+                            font.pointSize: app.idealFontPointSize/2
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.top
+                        }
+                        Rectangle {
+                            width: parent.width
+                            height: synopsisField.hovered ? 2 : 1
+                            color: synopsisField.hovered ? "black" : primaryColors.borderColor
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: app.idealFontPointSize/2
+                        }
+                    }
+                    selectByMouse: true
+                    selectByKeyboard: true
+                    placeholderText: "Describe what happens in this scene."
+                    font.pointSize: app.idealFontPointSize
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    TabSequenceItem.manager: indexCardTabSequence
+                    TabSequenceItem.sequence: 1
+                    text: element.scene.title
+                    onTextChanged: element.scene.title = text
+                    onActiveFocusChanged: if(activeFocus) elementItem.select()
+                    Keys.onEscapePressed: indexCardTabSequence.releaseFocus()
+                }
+
+                TextField2 {
+                    id: emotionChangeField
+                    width: parent.width
+                    label: "Emotional Change"
+                    labelAlwaysVisible: true
+                    placeholderText: "+/- emotional change in this scene..."
+                    font.pointSize: app.idealFontPointSize - 3
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    TabSequenceItem.manager: indexCardTabSequence
+                    TabSequenceItem.sequence: 2
+                    text: element.scene.emotionalChange
+                    onTextEdited: element.scene.emotionalChange = text
+                    onActiveFocusChanged: if(activeFocus) elementItem.select()
+                    Keys.onEscapePressed: indexCardTabSequence.releaseFocus()
+                }
+
+                TextField2 {
+                    id: conflictCharsField
+                    width: parent.width
+                    label: "Conflicting Characters"
+                    labelAlwaysVisible: true
+                    placeholderText: ">< characters in conflict in this scene..."
+                    font.pointSize: app.idealFontPointSize - 3
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    TabSequenceItem.manager: indexCardTabSequence
+                    TabSequenceItem.sequence: 3
+                    text: element.scene.charactersInConflict
+                    onTextEdited: element.scene.charactersInConflict = text
+                    onActiveFocusChanged: if(activeFocus) elementItem.select()
+                    Keys.onEscapePressed: indexCardTabSequence.releaseFocus()
+                }
+
+                TextField2 {
+                    id: pageTargetField
+                    width: parent.width
+                    label: "Page Target"
+                    labelAlwaysVisible: true
+                    placeholderText: "5, 10-20 etc.."
+                    font.pointSize: app.idealFontPointSize - 3
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    TabSequenceItem.manager: indexCardTabSequence
+                    TabSequenceItem.sequence: 4
+                    text: element.scene.pageTarget
+                    onTextEdited: element.scene.pageTarget = text
+                    onActiveFocusChanged: if(activeFocus) elementItem.select()
+                    Keys.onEscapePressed: indexCardTabSequence.releaseFocus()
+                }
+
+                Item {
+                    width: parent.width
+                    height: Math.max(characterList.height, dragHandle.height)
+
+                    SceneTypeImage {
+                        id: sceneTypeImage
+                        width: 24; height: 24
+                        opacity: 0.5
+                        showTooltip: false
+                        sceneType: element.scene.type
+                        anchors.left: parent.left
+                        anchors.bottom: parent.bottom
+                        visible: sceneType !== Scene.Standard
+                    }
+
+                    Text {
+                        id: characterList
+                        font.pointSize: app.idealAppFontSize - 2
+                        anchors.left: sceneTypeImage.right
+                        anchors.right: dragHandle.left
+                        anchors.margins: 5
+                        anchors.verticalCenter: parent.verticalCenter
+                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                        horizontalAlignment: width < contentWidth ? Text.AlignHCenter : Text.AlignLeft
+                        opacity: element.scene.hasCharacters ? 1 : 0
+                        text: {
+                            if(element.scene.hasCharacters)
+                                return "<b>Characters</b>: " + element.scene.characterNames.join(", ")
+                            return ""
+                        }
+                    }
+
+                    Image {
+                        id: dragHandle
+                        source: "../icons/action/view_array.png"
+                        width: 24; height: 24
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        scale: dragHandleMouseArea.containsMouse ? 2 : 1
+                        opacity: dragHandleMouseArea.containsMouse ? 1 : 0.1
+                        Behavior on scale {
+                            enabled: screenplayEditorSettings.enableAnimations
+                            NumberAnimation { duration: 250 }
+                        }
+
+                        MouseArea {
+                            id: dragHandleMouseArea
+                            anchors.fill: parent
+                            hoverEnabled: !canvasScroll.flicking && !canvasScroll.moving && elementItem.selected
+                            drag.target: parent
+                            cursorShape: Qt.SizeAllCursor
+                            drag.onActiveChanged: {
+                                if(drag.active)
+                                    canvas.forceActiveFocus()
+                            }
+                            onContainsMouseChanged: {
+                                if(containsMouse)
+                                    canvasScroll.maybeDragItem = elementItem
+                                else if(canvasScroll.maybeDragItem === elementItem)
+                                    canvasScroll.maybeDragItem = null
+                            }
+                            onPressed: {
+                                canvas.forceActiveFocus()
+                                elementItem.grabToImage(function(result) {
+                                    elementItem.Drag.imageSource = result.url
+                                })
+                            }
+                        }
+                    }
+                }
+
+                // Drag to timeline support
+                Drag.active: dragHandleMouseArea.drag.active
+                Drag.dragType: Drag.Automatic
+                Drag.supportedActions: Qt.LinkAction
+                Drag.mimeData: { "scrite/sceneID": element.scene.id }
+                Drag.source: element.scene
             }
         }
     }
@@ -1413,6 +1872,10 @@ Item {
                         result.accept = true
                         result.filter = true
                     }
+                    break
+                case Qt.Key_Escape:
+                    annotationGripLoader.reset()
+                    break
                 }
             }
 
@@ -1427,11 +1890,19 @@ Item {
             onWidthChanged: annotGeoUpdateTimer.start()
             onHeightChanged: annotGeoUpdateTimer.start()
 
+            function snapAnnotationGeometryToGrid(rect) {
+                var gx = scriteDocument.structure.snapToGrid(rect.x)
+                var gy = scriteDocument.structure.snapToGrid(rect.y)
+                var gw = scriteDocument.structure.snapToGrid(rect.width)
+                var gh = scriteDocument.structure.snapToGrid(rect.height)
+                annotation.geometry = Qt.rect(gx, gy, gw, gh)
+            }
+
             Timer {
                 id: annotGeoUpdateTimer
                 interval: geometryUpdateInterval
                 onTriggered: {
-                    annotation.geometry = Qt.rect(annotationGripItem.x, annotationGripItem.y, annotationGripItem.width, annotationGripItem.height)
+                    snapAnnotationGeometryToGrid(Qt.rect(annotationGripItem.x,annotationGripItem.y,annotationGripItem.width,annotationGripItem.height))
                 }
             }
 
@@ -1469,7 +1940,7 @@ Item {
                     id: widthUpdateTimer
                     interval: geometryUpdateInterval
                     onTriggered: {
-                        annotation.geometry = Qt.rect(annotationGripItem.x, annotationGripItem.y, rightGrip.x + rightGrip.width/2, annotationGripItem.height)
+                        snapAnnotationGeometryToGrid(Qt.rect(annotationGripItem.x, annotationGripItem.y, rightGrip.x + rightGrip.width/2, annotationGripItem.height))
                     }
                 }
 
@@ -1500,7 +1971,7 @@ Item {
                     id: heightUpdateTimer
                     interval: geometryUpdateInterval
                     onTriggered: {
-                        annotation.geometry = Qt.rect(annotationGripItem.x, annotationGripItem.y, annotationGripItem.width, bottomGrip.y + bottomGrip.height/2)
+                        snapAnnotationGeometryToGrid(Qt.rect(annotationGripItem.x, annotationGripItem.y, annotationGripItem.width, bottomGrip.y + bottomGrip.height/2))
                     }
                 }
 
@@ -1532,7 +2003,7 @@ Item {
                     id: sizeUpdateTimer
                     interval: geometryUpdateInterval
                     onTriggered: {
-                        annotation.geometry = Qt.rect(annotationGripItem.x, annotationGripItem.y, bottomRightGrip.x + bottomRightGrip.width/2, bottomRightGrip.y + bottomRightGrip.height/2)
+                        snapAnnotationGeometryToGrid(Qt.rect(annotationGripItem.x, annotationGripItem.y, bottomRightGrip.x + bottomRightGrip.width/2, bottomRightGrip.y + bottomRightGrip.height/2))
                     }
                 }
 
@@ -1577,9 +2048,9 @@ Item {
         id: rectangleAnnotationComponent
 
         AnnotationItem {
-            TightBoundingBoxItem.previewFillColor: app.translucent(color, opacity)
-            TightBoundingBoxItem.previewBorderColor: app.translucent(border.color, opacity)
-            TightBoundingBoxItem.livePreview: false
+            BoundingBoxItem.previewFillColor: app.translucent(color, opacity)
+            BoundingBoxItem.previewBorderColor: app.translucent(border.color, opacity)
+            BoundingBoxItem.livePreview: false
         }
     }
 
@@ -1782,7 +2253,7 @@ Item {
                         width: parent.width
                         wrapMode: Text.WordWrap
                         elide: Text.ElideRight
-                        maximumLineCount: 4
+                        maximumLineCount: 3
                     }
 
                     Text {
@@ -1857,7 +2328,7 @@ Item {
                 asynchronous: true
                 onStatusChanged: {
                     if(status === Image.Ready)
-                        parent.TightBoundingBoxItem.markPreviewDirty()
+                        parent.BoundingBoxItem.markPreviewDirty()
                 }
             }
 
@@ -1931,5 +2402,9 @@ Item {
             x: annotation.geometry.x
             y: annotation.geometry.y
         }
+    }
+
+    function requestEditorLater() {
+        app.execLater(screenplayView, 100, function() { requestEditor() })
     }
 }

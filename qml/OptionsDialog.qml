@@ -311,86 +311,127 @@ Item {
             GroupBox {
                 width: parent.width - 60
                 anchors.horizontalCenter: parent.horizontalCenter
+                title: "Structure Canvas"
 
-                Column {
+                Row {
                     width: parent.width
-                    spacing: 10
+                    spacing: 20
 
-                    CheckBox2 {
-                        checkable: true
-                        checked: structureCanvasSettings.showGrid
-                        text: "Show Grid in Structure Tab"
-                        onToggled: structureCanvasSettings.showGrid = checked
-                    }
-
-                    // Colors
-                    Row {
+                    Column {
+                        width: (parent.width-parent.spacing)/2
                         spacing: 10
-                        width: parent.width
 
-                        Text {
-                            font.pixelSize: 14
-                            text: "Background Color"
-                            horizontalAlignment: Text.AlignRight
-                            anchors.verticalCenter: parent.verticalCenter
+                        CheckBox2 {
+                            checkable: true
+                            checked: structureCanvasSettings.showGrid
+                            text: "Show Grid in Structure Tab"
+                            onToggled: structureCanvasSettings.showGrid = checked
+                            width: parent.width
                         }
 
-                        Rectangle {
-                            border.width: 1
-                            border.color: primaryColors.borderColor
-                            width: 30; height: 30
-                            color: structureCanvasSettings.canvasColor
-                            anchors.verticalCenter: parent.verticalCenter
+                        // Colors
+                        Row {
+                            spacing: 10
+                            width: parent.width
 
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: structureCanvasSettings.canvasColor = app.pickColor(structureCanvasSettings.canvasColor)
+                            Text {
+                                font.pixelSize: 14
+                                text: "Background Color"
+                                horizontalAlignment: Text.AlignRight
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            Rectangle {
+                                border.width: 1
+                                border.color: primaryColors.borderColor
+                                width: 30; height: 30
+                                color: structureCanvasSettings.canvasColor
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: structureCanvasSettings.canvasColor = app.pickColor(structureCanvasSettings.canvasColor)
+                                }
+                            }
+
+                            Text {
+                                text: "Grid Color"
+                                font.pixelSize: 14
+                                horizontalAlignment: Text.AlignRight
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            Rectangle {
+                                border.width: 1
+                                border.color: primaryColors.borderColor
+                                width: 30; height: 30
+                                color: structureCanvasSettings.gridColor
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: structureCanvasSettings.gridColor = app.pickColor(structureCanvasSettings.gridColor)
+                                }
                             }
                         }
 
-                        Text {
-                            text: "Grid Color"
-                            font.pixelSize: 14
-                            horizontalAlignment: Text.AlignRight
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
+                        Row {
+                            spacing: 10
+                            width: parent.width
+                            visible: app.isWindowsPlatform || app.isLinuxPlatform
 
-                        Rectangle {
-                            border.width: 1
-                            border.color: primaryColors.borderColor
-                            width: 30; height: 30
-                            color: structureCanvasSettings.gridColor
-                            anchors.verticalCenter: parent.verticalCenter
+                            Text {
+                                id: wzfText
+                                text: "Zoom Speed"
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
 
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: structureCanvasSettings.gridColor = app.pickColor(structureCanvasSettings.gridColor)
+                            Slider {
+                                from: 1
+                                to: 20
+                                orientation: Qt.Horizontal
+                                snapMode: Slider.SnapAlways
+                                value: scrollAreaSettings.zoomFactor * 100
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width-wzfText.width-parent.spacing
+                                onMoved: scrollAreaSettings.zoomFactor = value / 100
                             }
                         }
                     }
 
-                    Row {
-                        spacing: 10
-                        width: parent.width
-                        visible: app.isWindowsPlatform || app.isLinuxPlatform
+                    Column {
+                        width: (parent.width-parent.spacing)/2
 
                         Text {
-                            id: wzfText
-                            text: "Zoom Speed"
-                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            text: "Starting with version 0.5.5, Scrite documents use Index Card UI by default. Older projects continue to use synopsis editor as before."
                         }
 
-                        Slider {
-                            from: 1
-                            to: 20
-                            orientation: Qt.Horizontal
-                            snapMode: Slider.SnapAlways
-                            value: scrollAreaSettings.zoomFactor * 100
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width-wzfText.width-parent.spacing
-                            onMoved: scrollAreaSettings.zoomFactor = value / 100
+                        CheckBox2 {
+                            text: "Use Index Card UI On Canvas"
+                            checkable: true
+                            checked: scriteDocument.structure.canvasUIMode === Structure.IndexCardUI
+                            onToggled: {
+                                var toggleCanvasUI = function() {
+                                    if(scriteDocument.structure.canvasUIMode === Structure.IndexCardUI)
+                                        scriteDocument.structure.canvasUIMode = Structure.SynopsisEditorUI
+                                    else
+                                        scriteDocument.structure.canvasUIMode = Structure.IndexCardUI
+                                }
+
+                                if(mainTabBar.currentIndex === 0) {
+                                    toggleCanvasUI()
+                                } else {
+                                    contentLoader.active = false
+                                    app.execLater(contentLoader, 100, function() {
+                                        toggleCanvasUI()
+                                        contentLoader.active = true
+                                    })
+                                }
+                            }
                         }
                     }
                 }
@@ -456,7 +497,7 @@ Item {
                     Text {
                         width: parent.width
                         font.pointSize: app.idealFontPointSize
-                        text: "By default Scrite shows Screenplay, Structure and Notebook in separate tabs on the main window. If you have a large display, you can move Notebook into the Structure tab and see all aspects of your screenplay within the Structure tab itself."
+                        text: "By default Scrite shows Screenplay, Structure and Notebook in separate tabs on the main window. If you have a small display, you can move Notebook into a separate tab. Otherwise its productive to see all aspects of your screenplay within the Structure tab itself."
                         wrapMode: Text.WordWrap
                     }
 
@@ -492,6 +533,7 @@ Item {
                         width: parent.width
                         wrapMode: Text.WordWrap
                         textFormat: TextArea.RichText
+                        readOnly: true
                         background: Item { }
                         text: "<p>Relationship graphs are automatically constructed using the Force Directed Graph algorithm. You can configure attributes of the algorithm using the fields below. The default values work for most cases.</p>" +
                               "<font size=\"-1\"><ul><li><strong>Max Time</strong> is the number of milliseconds the algorithm can take to compute the graph.</li><li><strong>Max Iterations</strong> is the number of times within max-time the graph can go over each character to determine the ideal placement of nodes and edges in the graph.</li></ul></font>"
@@ -613,25 +655,55 @@ Item {
 
                 Row {
                     spacing: 20
-                    width: parent.width/2 - 5
+                    width: parent.width
 
-                    Text {
-                        id: paperSizeLabel
-                        text: "Paper Size"
-                        anchors.verticalCenter: parent.verticalCenter
+                    Row {
+                        spacing: 20
+                        width: (parent.width-parent.spacing)/2
+
+                        Text {
+                            id: paperSizeLabel
+                            text: "Paper Size"
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        ComboBox2 {
+                            width: parent.width - parent.spacing - paperSizeLabel.width
+                            textRole: "key"
+                            currentIndex: pageSetupSettings.paperSize
+                            anchors.verticalCenter: parent.verticalCenter
+                            onActivated: {
+                                pageSetupSettings.paperSize = currentIndex
+                                scriteDocument.formatting.pageLayout.paperSize = currentIndex
+                                scriteDocument.printFormat.pageLayout.paperSize = currentIndex
+                            }
+                            model: app.enumerationModelForType("ScreenplayPageLayout", "PaperSize")
+                        }
                     }
 
-                    ComboBox2 {
-                        width: parent.width - parent.spacing - paperSizeLabel.width
-                        textRole: "key"
-                        currentIndex: pageSetupSettings.paperSize
-                        anchors.verticalCenter: parent.verticalCenter
-                        onActivated: {
-                            pageSetupSettings.paperSize = currentIndex
-                            scriteDocument.formatting.pageLayout.paperSize = currentIndex
-                            scriteDocument.printFormat.pageLayout.paperSize = currentIndex
+                    Row {
+                        spacing: 20
+                        width: (parent.width-parent.spacing)/2
+
+                        Text {
+                            id: timePerPageLabel
+                            text: "Time Per Page:"
+                            anchors.verticalCenter: parent.verticalCenter
                         }
-                        model: app.enumerationModelForType("ScreenplayPageLayout", "PaperSize")
+
+                        TextField2 {
+                            label: "Seconds (15 - 300)"
+                            labelAlwaysVisible: true
+                            text: scriteDocument.printFormat.secondsPerPage
+                            validator: IntValidator { bottom: 15; top: 300 }
+                            onTextEdited: scriteDocument.printFormat.secondsPerPage = parseInt(text)
+                            width: sceneEditorFontMetrics.averageCharacterWidth*3
+                        }
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "seconds per page."
+                        }
                     }
                 }
 
@@ -1063,6 +1135,8 @@ Item {
                             if(fileUrl != "")
                                 scriteDocument.screenplay.setCoverPagePhoto(app.urlToLocalFile(fileUrl))
                         }
+                        folder: workspaceSettings.lastOpenPhotosFolderUrl
+                        onFolderChanged: workspaceSettings.lastOpenPhotosFolderUrl = folder
                     }
                 }
 
@@ -1357,12 +1431,21 @@ Item {
                     }
                 }
 
-                CheckBox2 {
-                    id: includeInTitlePageCheckBox
+                Row {
+                    spacing: 20
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: "Include Title Page In Preview"
-                    checked: screenplayEditorSettings.includeTitlePageInPreview
-                    onToggled: screenplayEditorSettings.includeTitlePageInPreview = checked
+
+                    CheckBox2 {
+                        text: "Include Title Page In Preview"
+                        checked: screenplayEditorSettings.includeTitlePageInPreview
+                        onToggled: screenplayEditorSettings.includeTitlePageInPreview = checked
+                    }
+
+                    CheckBox2 {
+                        text: "Center Align Title Page"
+                        checked: scriteDocument.screenplay.titlePageIsCentered
+                        onToggled: scriteDocument.screenplay.titlePageIsCentered = checked
+                    }
                 }
             }
         }

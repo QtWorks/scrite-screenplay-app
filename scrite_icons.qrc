@@ -139,5 +139,45 @@
         <file>icons/navigation/keyboard_arrow_down_inverted.png</file>
         <file>icons/hardware/mouse_inverted.png</file>
         <file>icons/hardware/mouse.png</file>
+        <file>icons/content/camera_alt.png</file>
+        <file>icons/content/camera_alt_inverted.png</file>
+        <file>icons/action/layout_beat_sheet.png</file>
+        <file>icons/action/layout_beat_sheet_inverted.png</file>
+        <file>icons/action/flag.png</file>
+        <file>icons/action/flag_inverted.png</file>
+        <file>icons/navigation/structure_tab_inverted.png</file>
+        <file>icons/navigation/structure_tab.png</file>
+        <file>icons/navigation/notebook_tab.png</file>
+        <file>icons/navigation/notebook_tab_inverted.png</file>
+        <file>icons/navigation/screenplay_tab.png</file>
+        <file>icons/navigation/screenplay_tab_inverted.png</file>
+        <file>icons/navigation/scrited_tab.png</file>
+        <file>icons/navigation/scrited_tab_inverted.png</file>
+        <file>icons/mediaplayer/forward_10.png</file>
+        <file>icons/mediaplayer/forward_10_inverted.png</file>
+        <file>icons/mediaplayer/pause.png</file>
+        <file>icons/mediaplayer/pause_inverted.png</file>
+        <file>icons/mediaplayer/play_arrow.png</file>
+        <file>icons/mediaplayer/play_arrow_inverted.png</file>
+        <file>icons/mediaplayer/rewind_10.png</file>
+        <file>icons/mediaplayer/rewind_10_inverted.png</file>
+        <file>icons/mediaplayer/movie.png</file>
+        <file>icons/mediaplayer/movie_inverted.png</file>
+        <file>icons/mediaplayer/fast_rewind.png</file>
+        <file>icons/mediaplayer/fast_rewind_inverted.png</file>
+        <file>icons/mediaplayer/fast_forward.png</file>
+        <file>icons/mediaplayer/fast_forward_inverted.png</file>
+        <file>icons/mediaplayer/sync_with_screenplay.png</file>
+        <file>icons/mediaplayer/sync_with_screenplay_inverted.png</file>
+        <file>icons/mediaplayer/time_column.png</file>
+        <file>icons/mediaplayer/time_column_inverted.png</file>
+        <file>icons/mediaplayer/reset_screenplay_offsets_inverted.png</file>
+        <file>icons/mediaplayer/reset_screenplay_offsets.png</file>
+        <file>icons/editor/format_bold_inverted.png</file>
+        <file>icons/editor/format_bold.png</file>
+        <file>icons/editor/format_ital24px_inverted.png</file>
+        <file>icons/editor/format_ital24px.png</file>
+        <file>icons/editor/format_underline_inverted.png</file>
+        <file>icons/editor/format_underline.png</file>
     </qresource>
 </RCC>

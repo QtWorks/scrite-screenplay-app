@@ -158,6 +158,10 @@ public:
     bool isLoading() const { return m_loading; }
     Q_SIGNAL void loadingChanged();
 
+    Q_PROPERTY(bool isCreatedOnThisComputer READ isCreatedOnThisComputer NOTIFY createdOnThisComputerChanged)
+    bool isCreatedOnThisComputer() const { return m_createdOnThisComputer; }
+    Q_SIGNAL void createdOnThisComputerChanged();
+
     Q_INVOKABLE void reset();
 
     Q_INVOKABLE void open(const QString &fileName);
@@ -183,6 +187,7 @@ public:
 
     Q_INVOKABLE bool importFile(const QString &fileName, const QString &format);
     Q_INVOKABLE bool exportFile(const QString &fileName, const QString &format);
+    Q_INVOKABLE bool exportToImage(int fromSceneIdx, int fromParaIdx, int toSceneIdx, int toParaIdx, const QString &imageFileName);
 
     Q_INVOKABLE AbstractExporter *createExporter(const QString &format);
     Q_INVOKABLE AbstractReportGenerator *createReportGenerator(const QString &report);
@@ -194,6 +199,8 @@ public:
 
     // Callers must be responsible for how they use this.
     DocumentFileSystem *fileSystem() { return &m_docFileSystem; }
+    Q_INVOKABLE void blockUI() { this->setLoading(true); }
+    Q_INVOKABLE void unblockUI() { this->setLoading(false); }
 
 protected:
     void timerEvent(QTimerEvent *event);
@@ -215,9 +222,10 @@ private:
     void setFileName(const QString &val);
     bool load(const QString &fileName);
     bool classicLoad(const QString &fileName);
-    bool modernLoad(const QString &fileName);
+    bool modernLoad(const QString &fileName, int *format=nullptr);
     void structureElementIndexChanged();
     void screenplayElementIndexChanged();
+    void setCreatedOnThisComputer(bool val);
 
 public:
     // QObjectSerializer::Interface implementation
@@ -241,6 +249,7 @@ private:
     QString m_fileName;
     QString m_busyMessage;
     bool m_inCreateNewScene = false;
+    bool m_createdOnThisComputer = true;
     ExecLaterTimer m_autoSaveTimer;
     QString m_documentWindowTitle;
     ExecLaterTimer m_clearModifyTimer;

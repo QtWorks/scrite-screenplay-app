@@ -23,7 +23,10 @@
 #include "textexporter.h"
 #include "notification.h"
 #include "htmlimporter.h"
+#include "timeprofiler.h"
 #include "qobjectfactory.h"
+#include "locationreport.h"
+#include "characterreport.h"
 #include "fountainimporter.h"
 #include "fountainexporter.h"
 #include "structureexporter.h"
@@ -31,8 +34,6 @@
 #include "finaldraftimporter.h"
 #include "finaldraftexporter.h"
 #include "screenplaysubsetreport.h"
-#include "locationreport.h"
-#include "characterreport.h"
 #include "locationscreenplayreport.h"
 #include "characterscreenplayreport.h"
 #include "scenecharactermatrixreport.h"
@@ -45,7 +46,9 @@
 #include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QStandardPaths>
+#include <QRandomGenerator>
 #include <QScopedValueRollback>
+#include <QPainter>
 
 class DeviceIOFactories
 {
@@ -72,7 +75,9 @@ DeviceIOFactories::DeviceIOFactories()
     ExporterFactory.addClass<HtmlExporter>();
     ExporterFactory.addClass<TextExporter>();
     ExporterFactory.addClass<FountainExporter>();
-    ExporterFactory.addClass<StructureExporter>();
+    // Until we are able to reliably export structure's appearance in a way
+    // that it can be printed, there is no point in having this exporter.
+    // ExporterFactory.addClass<StructureExporter>();
     ExporterFactory.addClass<FinalDraftExporter>();
 
     ReportsFactory.addClass<ScreenplaySubsetReport>();
@@ -222,19 +227,19 @@ Scene *ScriteDocument::createNewScene()
 
     structureElement = m_structure->elementAt(structureElementIndex);
 
-    const qreal xOffset = (structureElement && structureElementIndex%2) ? -275 : 275;
-    const qreal x = structureElement ? (structureElement->x() + xOffset) : m_structure->canvasWidth() * 0.4;
-    const qreal y = structureElement ? (structureElement->y() + structureElement->height() + 50) : m_structure->canvasHeight() * 0.4;
-
     Scene *activeScene = structureElement ? structureElement->scene() : nullptr;
 
+    const QVector<QColor> standardColors = Application::standardColors(QVersionNumber());
+    const QColor defaultColor = standardColors.at( QRandomGenerator::global()->bounded(standardColors.size()-1) );
+
     Scene *scene = new Scene(m_structure);
-    scene->setColor(activeScene ? activeScene->color() : QColor("white"));
-    scene->setTitle("New Scene");
+    scene->setColor(activeScene ? activeScene->color() : defaultColor);
+    if(m_structure->canvasUIMode() != Structure::IndexCardUI)
+        scene->setTitle( QStringLiteral("New Scene") );
     scene->heading()->setEnabled(true);
-    scene->heading()->setLocationType(activeScene ? activeScene->heading()->locationType() : "EXT");
-    scene->heading()->setLocation(activeScene ? activeScene->heading()->location() : "SOMEWHERE");
-    scene->heading()->setMoment(activeScene ? "LATER" : "DAY");
+    scene->heading()->setLocationType(activeScene ? activeScene->heading()->locationType() : QStringLiteral("EXT"));
+    scene->heading()->setLocation(activeScene ? activeScene->heading()->location() : QStringLiteral("SOMEWHERE"));
+    scene->heading()->setMoment(activeScene ? QStringLiteral("LATER") : QStringLiteral("DAY"));
 
     SceneElement *firstPara = new SceneElement(scene);
     firstPara->setType(SceneElement::Action);
@@ -242,27 +247,29 @@ Scene *ScriteDocument::createNewScene()
 
     StructureElement *newStructureElement = new StructureElement(m_structure);
     newStructureElement->setScene(scene);
-    newStructureElement->setX(x);
-    newStructureElement->setY(y);
     m_structure->addElement(newStructureElement);
+
+    const bool asLastScene = m_screenplay->currentElementIndex() < 0 ||
+                            (m_screenplay->currentElementIndex() == m_screenplay->lastSceneIndex());
 
     ScreenplayElement *newScreenplayElement = new ScreenplayElement(m_screenplay);
     newScreenplayElement->setScene(scene);
     int newScreenplayElementIndex = -1;
-    if(m_screenplay->currentElementIndex() >= 0)
-    {
-        newScreenplayElementIndex = m_screenplay->currentElementIndex()+1;
-        m_screenplay->insertElementAt(newScreenplayElement, m_screenplay->currentElementIndex()+1);
-    }
-    else
+    if(asLastScene)
     {
         newScreenplayElementIndex = m_screenplay->elementCount();
         m_screenplay->addElement(newScreenplayElement);
+    }
+    else
+    {
+        newScreenplayElementIndex = m_screenplay->currentElementIndex()+1;
+        m_screenplay->insertElementAt(newScreenplayElement, m_screenplay->currentElementIndex()+1);
     }
 
     if(m_screenplay->elementAt(newScreenplayElementIndex) != newScreenplayElement)
         newScreenplayElementIndex = m_screenplay->indexOfElement(newScreenplayElement);
 
+    m_structure->placeElement(newStructureElement, m_screenplay);
     m_structure->setCurrentElementIndex(m_structure->elementCount()-1);
     m_screenplay->setCurrentElementIndex(newScreenplayElementIndex);
 
@@ -384,7 +391,7 @@ void ScriteDocument::saveAs(const QString &givenFileName)
     emit aboutToSave();
 
     const QJsonObject json = QObjectSerializer::toJson(this);
-    const QByteArray bytes = QJsonDocument(json).toBinaryData();
+    const QByteArray bytes = QJsonDocument(json).toJson();
     m_docFileSystem.setHeader(bytes);
     m_docFileSystem.save(fileName);
 
@@ -397,9 +404,11 @@ void ScriteDocument::saveAs(const QString &givenFileName)
         const QString fileName2 = fi.absolutePath() + "/" + fi.baseName() + ".json";
         QFile file2(fileName2);
         file2.open(QFile::WriteOnly);
-        file2.write(QJsonDocument(json).toJson());
+        file2.write(bytes);
     }
 #endif
+
+    this->setCreatedOnThisComputer(true);
 
     emit justSaved();
 
@@ -613,6 +622,84 @@ bool ScriteDocument::exportFile(const QString &fileName, const QString &format)
     return ret;
 }
 
+bool ScriteDocument::exportToImage(int fromSceneIdx, int fromParaIdx, int toSceneIdx, int toParaIdx, const QString &imageFileName)
+{
+    const int nrScenes = m_screenplay->elementCount();
+    if(fromSceneIdx < 0 || fromSceneIdx >= nrScenes)
+        return false;
+
+    if(toSceneIdx < 0 || toSceneIdx >= nrScenes)
+        return false;
+
+    QTextDocument document;
+    // m_printFormat->pageLayout()->configure(&document);
+    document.setTextWidth(m_printFormat->pageLayout()->contentWidth());
+
+    QTextCursor cursor(&document);
+
+    auto prepareCursor = [=](QTextCursor &cursor, SceneElement::Type paraType) {
+        const qreal pageWidth = m_printFormat->pageLayout()->contentWidth();
+        const SceneElementFormat *format = m_printFormat->elementFormat(paraType);
+        QTextBlockFormat blockFormat = format->createBlockFormat(&pageWidth);
+        QTextCharFormat charFormat = format->createCharFormat(&pageWidth);
+        cursor.setCharFormat(charFormat);
+        cursor.setBlockFormat(blockFormat);
+    };
+
+    for(int i=fromSceneIdx; i<=toSceneIdx; i++)
+    {
+        const ScreenplayElement *element = m_screenplay->elementAt(i);
+        if(element->scene() == nullptr)
+            continue;
+
+        const Scene *scene = element->scene();
+        int startParaIdx = -1, endParaIdx = -1;
+
+        if(cursor.position() > 0)
+        {
+            cursor.insertBlock();
+            startParaIdx = qMax(fromParaIdx, 0);
+        }
+        else
+            startParaIdx = 0;
+
+        endParaIdx = (i == toSceneIdx) ? qMin(toParaIdx, scene->elementCount()-1) : toParaIdx;
+        if(endParaIdx < 0)
+            endParaIdx = scene->elementCount()-1;
+
+        if(startParaIdx == 0 && scene->heading()->isEnabled())
+        {
+            prepareCursor(cursor, SceneElement::Heading);
+            cursor.insertText(QStringLiteral("[") + element->resolvedSceneNumber() + QStringLiteral("] "));
+            cursor.insertText(scene->heading()->text());
+            cursor.insertBlock();
+        }
+
+        for(int p=startParaIdx; p<=endParaIdx; p++)
+        {
+            const SceneElement *para = scene->elementAt(p);
+            prepareCursor(cursor, para->type());
+            cursor.insertText(para->text());
+            if(p < endParaIdx)
+                cursor.insertBlock();
+        }
+    }
+
+    const QSizeF docSize = document.documentLayout()->documentSize() * 2.0;
+
+    QImage image(docSize.toSize(), QImage::Format_ARGB32);
+    image.fill(Qt::transparent);
+
+    QPainter paint(&image);
+    paint.scale(2.0, 2.0);
+    document.drawContents(&paint, QRectF( QPointF(0,0), docSize) );
+    paint.end();
+
+    const QString format = QFileInfo(imageFileName).suffix().toUpper();
+
+    return image.save(imageFileName, qPrintable(format));
+}
+
 inline QString createTimestampString(const QDateTime &dt = QDateTime::currentDateTime())
 {
     static const QString format = QStringLiteral("MMM dd, yyyy HHmmss");
@@ -643,7 +730,12 @@ AbstractExporter *ScriteDocument::createExporter(const QString &format)
         if(fi.exists())
             exporter->setFileName( fi.absoluteDir().absoluteFilePath(suggestedName) );
         else
-            exporter->setFileName( QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/" + suggestedName );
+        {
+            const QUrl folderUrl( Application::instance()->settings()->value(QStringLiteral("Workspace/lastOpenExportFolderUrl")).toString() );
+            const QString path = folderUrl.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+                                                     : folderUrl.toLocalFile();
+            exporter->setFileName( path + QStringLiteral("/") + suggestedName );
+        }
     }
 
     ProgressReport *progressReport = exporter->findChild<ProgressReport*>();
@@ -685,7 +777,12 @@ AbstractReportGenerator *ScriteDocument::createReportGenerator(const QString &re
         if(fi.exists())
             reportGenerator->setFileName( fi.absoluteDir().absoluteFilePath(suggestedName) );
         else
-            reportGenerator->setFileName( QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/" + suggestedName );
+        {
+            const QUrl folderUrl( Application::instance()->settings()->value(QStringLiteral("Workspace/lastOpenReportsFolderUrl")).toString() );
+            const QString path = folderUrl.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+                                                     : folderUrl.toLocalFile();
+            reportGenerator->setFileName( path + QStringLiteral("/") + suggestedName );
+        }
     }
 
     ProgressReport *progressReport = reportGenerator->findChild<ProgressReport*>();
@@ -801,6 +898,7 @@ void ScriteDocument::setStructure(Structure *val)
 
     m_structure = val;
     m_structure->setParent(this);
+    m_structure->setObjectName("Document Structure");
 
     emit structureChanged();
 }
@@ -815,6 +913,7 @@ void ScriteDocument::setScreenplay(Screenplay *val)
 
     m_screenplay = val;
     m_screenplay->setParent(this);
+    m_screenplay->setObjectName("Document Screenplay");
 
     emit screenplayChanged();
 }
@@ -903,9 +1002,10 @@ bool ScriteDocument::load(const QString &fileName)
         return false;
     }
 
+    int format = DocumentFileSystem::ScriteFormat;
     bool loaded = this->classicLoad(fileName);
     if(!loaded)
-        loaded = this->modernLoad(fileName);
+        loaded = this->modernLoad(fileName, &format);
 
     if(!loaded)
     {
@@ -939,7 +1039,9 @@ bool ScriteDocument::load(const QString &fileName)
         ScriteDocument *m_document;
     } loadCleanup(this);
 
-    const QJsonDocument jsonDoc = QJsonDocument::fromBinaryData(m_docFileSystem.header());
+    const QJsonDocument jsonDoc = format == DocumentFileSystem::ZipFormat ?
+                                  QJsonDocument::fromJson(m_docFileSystem.header()) :
+                                  QJsonDocument::fromBinaryData(m_docFileSystem.header());
 
 #ifndef QT_NO_DEBUG
     {
@@ -1033,9 +1135,13 @@ bool ScriteDocument::classicLoad(const QString &fileName)
     return true;
 }
 
-bool ScriteDocument::modernLoad(const QString &fileName)
+bool ScriteDocument::modernLoad(const QString &fileName, int *format)
 {
-    return m_docFileSystem.load(fileName);
+    DocumentFileSystem::Format dfsFormat;
+    const bool ret = m_docFileSystem.load(fileName, &dfsFormat);
+    if(format)
+        *format = dfsFormat;
+    return ret;
 }
 
 void ScriteDocument::structureElementIndexChanged()
@@ -1068,6 +1174,15 @@ void ScriteDocument::screenplayElementIndexChanged()
         int index = m_structure->indexOfScene(element->scene());
         m_structure->setCurrentElementIndex(index);
     }
+}
+
+void ScriteDocument::setCreatedOnThisComputer(bool val)
+{
+    if(m_createdOnThisComputer == val)
+        return;
+
+    m_createdOnThisComputer = val;
+    emit createdOnThisComputerChanged();
 }
 
 void ScriteDocument::prepareForSerialization()
@@ -1113,6 +1228,12 @@ void ScriteDocument::serializeToJson(QJsonObject &json) const
 void ScriteDocument::deserializeFromJson(const QJsonObject &json)
 {
     const QJsonObject metaInfo = json.value("meta").toObject();
+    const QJsonObject systemInfo = metaInfo.value("system").toObject();
+
+    const QString thisMachineId = QString::fromLatin1(QSysInfo::machineUniqueId());
+    const QString jsonMachineId = systemInfo.value("machineUniqueId").toString() ;
+    this->setCreatedOnThisComputer(jsonMachineId == thisMachineId);
+
     const QString appVersion = metaInfo.value("appVersion").toString();
     const QVersionNumber version = QVersionNumber::fromString(appVersion);
     if( version <= QVersionNumber(0,1,9) )
@@ -1273,6 +1394,11 @@ void ScriteDocument::deserializeFromJson(const QJsonObject &json)
         format = m_printFormat->elementFormat(SceneElement::Transition);
         format->setTextAlignment(Qt::AlignRight);
     }
+
+    // Documents created using Scrite version 0.5.2 or before use SynopsisEditorUI
+    // by default.
+    if(version <= QVersionNumber(0,5,2))
+        m_structure->setCanvasUIMode(Structure::SynopsisEditorUI);
 }
 
 QString ScriteDocument::polishFileName(const QString &givenFileName) const

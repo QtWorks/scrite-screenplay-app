@@ -45,9 +45,16 @@ Item {
         property real workspaceHeight
         property real screenplayEditorWidth: -1
         property bool scriptalayIntroduced: false
-        property bool showNotebookInStructure: false
+        property bool showNotebookInStructure: true
         property bool mouseWheelZoomsInCharacterGraph: app.isWindowsPlatform || app.isLinuxPlatform
         property bool mouseWheelZoomsInStructureCanvas: app.isWindowsPlatform || app.isLinuxPlatform
+        property string lastOpenFolderUrl: "file:///" + StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+        property string lastOpenPhotosFolderUrl: "file:///" + StandardPaths.writableLocation(StandardPaths.PicturesLocation)
+        property string lastOpenImportFolderUrl: "file:///" + StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+        property string lastOpenExportFolderUrl: "file:///" + StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+        property string lastOpenReportsFolderUrl: "file:///" + StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+        property string lastOpenScritedFolderUrl: "file:///" + StandardPaths.writableLocation(StandardPaths.MoviesLocation)
+        property var customColors: []
 
         onShowNotebookInStructureChanged: {
             app.execLater(workspaceSettings, 100, function() {
@@ -61,7 +68,8 @@ Item {
         fileName: app.settingsFilePath
         category: "Screenplay Editor"
         property bool displaySceneCharacters: true
-        property bool displaySceneNotes: true
+        property bool displaySceneSynopsis: true
+        property bool displaySceneComments: false
         property int mainEditorZoomValue: -1
         property int embeddedEditorZoomValue: -1
         property bool includeTitlePageInPreview: true
@@ -71,6 +79,9 @@ Item {
             modalDialog.animationsEnabled = enableAnimations
             statusText.enableAnimations = enableAnimations
         }
+
+        property real textFormatDockWidgetX: -1
+        property real textFormatDockWidgetY: -1
     }
 
     Settings {
@@ -109,9 +120,18 @@ Item {
         context: Qt.ApplicationShortcut
         sequence: "Ctrl+Alt+S"
         ShortcutsModelItem.group: "Settings"
-        ShortcutsModelItem.title: screenplayEditorSettings.displaySceneNotes ? "Hide Synopsis" : "Show Synopsis"
+        ShortcutsModelItem.title: screenplayEditorSettings.displaySceneSynopsis ? "Hide Synopsis" : "Show Synopsis"
         ShortcutsModelItem.shortcut: sequence
-        onActivated: screenplayEditorSettings.displaySceneNotes = !screenplayEditorSettings.displaySceneNotes
+        onActivated: screenplayEditorSettings.displaySceneSynopsis = !screenplayEditorSettings.displaySceneSynopsis
+    }
+
+    Shortcut {
+        context: Qt.ApplicationShortcut
+        sequence: "Ctrl+Alt+M"
+        ShortcutsModelItem.group: "Settings"
+        ShortcutsModelItem.title: screenplayEditorSettings.displaySceneComments ? "Hide Comments" : "Show Comments"
+        ShortcutsModelItem.shortcut: sequence
+        onActivated: screenplayEditorSettings.displaySceneComments = !screenplayEditorSettings.displaySceneComments
     }
 
     Shortcut {
@@ -130,6 +150,17 @@ Item {
         ShortcutsModelItem.title: screenplayEditorSettings.enableAnimations ? "Disable Animations" : "Enable Animations"
         ShortcutsModelItem.shortcut: sequence
         onActivated: screenplayEditorSettings.enableAnimations = !screenplayEditorSettings.enableAnimations
+    }
+
+    Shortcut {
+        context: Qt.ApplicationShortcut
+        sequence: "Ctrl+M"
+        ShortcutsModelItem.group: "Application"
+        ShortcutsModelItem.title: "New Scrite Window"
+        ShortcutsModelItem.enabled: true
+        ShortcutsModelItem.shortcut: sequence
+        ShortcutsModelItem.visible: enabled
+        onActivated: app.launchNewInstance(qmlWindow)
     }
 
     Shortcut {
@@ -162,6 +193,17 @@ Item {
         ShortcutsModelItem.visible: enabled
         enabled: !workspaceSettings.showNotebookInStructure
         onActivated: mainTabBar.currentIndex = 2
+    }
+
+    Shortcut {
+        context: Qt.ApplicationShortcut
+        sequence: "Alt+4"
+        ShortcutsModelItem.group: "Application"
+        ShortcutsModelItem.title: "Scrited"
+        ShortcutsModelItem.enabled: enabled && mainTabBar.currentIndex !== 3
+        ShortcutsModelItem.shortcut: sequence
+        ShortcutsModelItem.visible: enabled
+        onActivated: mainTabBar.currentIndex = 3
     }
 
     Rectangle {
@@ -428,39 +470,24 @@ Item {
                 opacity: 0.5
             }
 
-            ToolButton3 {
-                shortcut: "Ctrl+Z"
-                shortcutText: "Z"
-                iconSource: "../icons/content/undo.png"
-                enabled: app.canUndo && !scriteDocument.readOnly
-                onClicked: app.undoGroup.undo()
-                ToolTip.text: "Undo" + "\t" + app.polishShortcutTextForDisplay(shortcut)
-
+            /*
+              Most users already know that Ctrl+Z is undo and Ctrl+Y is redo.
+              Therefore simply listing these shortcuts in shortcuts dockwidget
+              should be sufficient to establish their existence. Showing these
+              toolbuttons is robbing us of some really good screenspace.
+            */
+            QtObject {
                 ShortcutsModelItem.group: "Edit"
                 ShortcutsModelItem.title: "Undo"
-                ShortcutsModelItem.enabled: enabled
-                ShortcutsModelItem.shortcut: shortcut
+                ShortcutsModelItem.enabled: app.canUndo && !scriteDocument.readOnly // enabled
+                ShortcutsModelItem.shortcut: "Ctrl+Z" // shortcut
             }
 
-            ToolButton3 {
-                shortcut: app.isMacOSPlatform ? "Ctrl+Shift+Z" : "Ctrl+Y"
-                shortcutText: app.isMacOSPlatform ? "Shift+Z" : "Y"
-                iconSource: "../icons/content/redo.png"
-                enabled: app.canRedo && !scriteDocument.readOnly
-                onClicked: app.undoGroup.redo()
-                ToolTip.text: "Redo" + "\t" + app.polishShortcutTextForDisplay(shortcut)
-
+            QtObject {
                 ShortcutsModelItem.group: "Edit"
                 ShortcutsModelItem.title: "Redo"
-                ShortcutsModelItem.enabled: enabled
-                ShortcutsModelItem.shortcut: shortcut
-            }
-
-            Rectangle {
-                width: 1
-                height: parent.height
-                color: primaryColors.separatorColor
-                opacity: 0.5
+                ShortcutsModelItem.enabled: app.canRedo && !scriteDocument.readOnly // enabled
+                ShortcutsModelItem.shortcut: app.isMacOSPlatform ? "Ctrl+Shift+Z" : "Ctrl+Y" // shortcut
             }
 
             ToolButton3 {
@@ -718,6 +745,20 @@ Item {
                                 onActivated: shortcutsMenuItem.activate()
                             }
                         }
+
+                        MenuItem2 {
+                            text: "Toggle Fullscreen\tF7"
+                            icon.source: "../icons/navigation/fullscreen.png"
+                            onClicked: app.execLater(app, 100, function() { app.toggleFullscreen(qmlWindow) })
+                            ShortcutsModelItem.group: "Application"
+                            ShortcutsModelItem.title: "Toggle Fullscreen"
+                            ShortcutsModelItem.shortcut: "F7"
+                            Shortcut {
+                                context: Qt.ApplicationShortcut
+                                sequence: "F7"
+                                onActivated: app.execLater(app, 100, function() { app.toggleFullscreen(qmlWindow) })
+                            }
+                        }
                     }
                 }
             }
@@ -750,6 +791,7 @@ Item {
                 ToolTip.text: app.polishShortcutTextForDisplay("Language Transliteration" + "\t" + shortcut)
                 onClicked: languageMenu.visible = true
                 down: languageMenu.visible
+                visible: mainTabBar.currentIndex <= 2
 
                 Item {
                     anchors.top: parent.bottom
@@ -834,6 +876,7 @@ Item {
                 onClicked: alphabetMappingsPopup.visible = !alphabetMappingsPopup.visible
                 down: alphabetMappingsPopup.visible
                 enabled: app.transliterationEngine.language !== TransliterationEngine.English
+                visible: mainTabBar.currentIndex <= 2
 
                 ShortcutsModelItem.priority: 1
                 ShortcutsModelItem.group: "Language"
@@ -893,6 +936,7 @@ Item {
                 font.pointSize: app.idealFontPointSize-2
                 property string fullText: app.transliterationEngine.languageAsString
                 width: 80
+                visible: mainTabBar.currentIndex <= 2
 
                 MouseArea {
                     anchors.fill: parent
@@ -1092,6 +1136,12 @@ Item {
                                 font.bold: mainTabBar.currentIndex === 2
                                 enabled: !workspaceSettings.showNotebookInStructure
                             }
+
+                            MenuItem2 {
+                                text: "Scrited (" + app.polishShortcutTextForDisplay("Alt+4") + ")"
+                                onTriggered: mainTabBar.currentIndex = 3
+                                font.bold: mainTabBar.currentIndex === 3
+                            }
                         }
 
                         MenuSeparator { }
@@ -1111,11 +1161,80 @@ Item {
             }
         }
 
+        Item {
+            id: globalTimeDisplay
+            anchors.left: appToolBar.visible ? appToolBar.right : appToolsMenu.right
+            anchors.right: editTools.visible ? editTools.left : parent.right
+            anchors.margins: 10
+            height: parent.height
+            property ScreenplayTextDocument screenplayTextDocument
+            visible: screenplayTextDocument !== null
+            property alias visibleToUser: currentTimeDisplay.visible
+            property real contentWidth: currentTimeLabel.visible ? currentTimeLabel.width + 10 : 0
+
+            Rectangle {
+                visible: currentTimeDisplay.visible
+                anchors.fill: currentTimeDisplay
+                anchors.margins: -5
+                color: primaryColors.c800.background
+                border.color: primaryColors.c300.background
+                border.width: 1
+                radius: 3
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+
+                    ToolTip.text: "Time estimates are approximate, assuming " + globalTimeDisplay.screenplayTextDocument.timePerPageAsString + " per page."
+                    ToolTip.delay: 1000
+                    ToolTip.visible: containsMouse
+                }
+            }
+
+            Column {
+                id: currentTimeDisplay
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                visible: width <= parent.width
+
+                Text {
+                    id: currentTimeLabel
+                    font.pixelSize: globalTimeDisplay.height*0.45
+                    font.family: scriteDocument.formatting.defaultFont.family
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    color: primaryColors.c800.text
+                    text: {
+                        if(globalTimeDisplay.screenplayTextDocument === null)
+                            return "00:00"
+                        if(globalTimeDisplay.screenplayTextDocument.totalTime.getHours() > 0)
+                            return Qt.formatTime(globalTimeDisplay.screenplayTextDocument.currentTime, "H:mm:ss")
+                        return Qt.formatTime(globalTimeDisplay.screenplayTextDocument.currentTime, "mm:ss")
+                    }
+                }
+
+                Text {
+                    font.pixelSize: globalTimeDisplay.height*0.15
+                    color: primaryColors.c800.text
+                    text: "( Current Time )"
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+            }
+        }
+
+        ScritedToolbar {
+            id: scritedToolbar
+            anchors.left: appToolBar.visible ? appToolBar.right : appToolsMenu.right
+            anchors.right: editTools.visible ? editTools.left : parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.margins: 10
+            visible: scritedView !== null
+        }
+
         Row {
             id: editTools
-            x: appToolBar.visible ? (parent.width - appLogo.width - width) : (appToolsMenu.x + (parent.width - width - appToolsMenu.width - appToolsMenu.x) / 2)
+            x: appToolBar.visible ? (parent.width - appLogo.width - width) : (appToolsMenu.x + (parent.width - width - appToolsMenu.width - appToolsMenu.x)/2 + (globalTimeDisplay.visible ? globalTimeDisplay.contentWidth/2 : 0))
             height: parent.height
-            spacing: 2
+            spacing: 20
 
             ScreenplayEditorToolbar {
                 id: globalScreenplayEditorToolbar
@@ -1124,6 +1243,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 binder: sceneEditor ? sceneEditor.binder : null
                 editor: sceneEditor ? sceneEditor.editor : null
+                visible: mainTabBar.currentIndex === 1 || mainTabBar.currentIndex === 0
             }
 
             Row {
@@ -1133,7 +1253,12 @@ Item {
 
                 property Item currentTab: currentIndex >= 0 && mainTabBarRepeater.count === tabs.length ? mainTabBarRepeater.itemAt(currentIndex) : null
                 property int currentIndex: -1
-                readonly property var tabs: workspaceSettings.showNotebookInStructure ? ["Screenplay", "Structure"] : ["Screenplay", "Structure", "Notebook"]
+                readonly property var tabs: [
+                    { "name": "Screenplay", "icon": "../icons/navigation/screenplay_tab.png", "visible": true },
+                    { "name": "Structure", "icon": "../icons/navigation/structure_tab.png", "visible": true },
+                    { "name": "Notebook", "icon": "../icons/navigation/notebook_tab.png", "visible": !workspaceSettings.showNotebookInStructure },
+                    { "name": "Scrited", "icon": "../icons/navigation/scrited_tab.png", "visible": true }
+                ]
                 property var currentTabP1: currentTabExtents.value.p1
                 property var currentTabP2: currentTabExtents.value.p2
                 readonly property color activeTabColor: primaryColors.windowColor
@@ -1175,7 +1300,9 @@ Item {
                     Item {
                         property bool active: mainTabBar.currentIndex === index
                         height: mainTabBar.height
-                        width: tabBarFontMetrics.advanceWidth(modelData) + (documentUI.width >= 1485 ? 30 : 20)
+                        width: height
+                        visible: modelData.visible
+                        enabled: modelData.visible
 
                         PainterPathItem {
                             anchors.fill: parent
@@ -1202,20 +1329,27 @@ Item {
                             font.pointSize: app.idealFontPointSize
                         }
 
-                        Text {
-                            id: tabBarText
-                            text: modelData
+                        Image {
+                            source: modelData.icon
+                            width: parent.active ? 32 : 24; height: width
+                            Behavior on width {
+                                enabled: screenplayEditorSettings.enableAnimations
+                                NumberAnimation { duration: 250 }
+                            }
+
+                            fillMode: Image.PreserveAspectFit
                             anchors.centerIn: parent
-                            anchors.verticalCenterOffset:parent.active ? 0 : 1
-                            font.pointSize: app.idealFontPointSize
-                            font.bold: parent.active
+                            anchors.verticalCenterOffset: parent.active ? 0 : 1
+                            opacity: parent.active ? 1 : 0.75
                         }
 
                         MouseArea {
-                            id: tabBarMouseArea
                             anchors.fill: parent
                             hoverEnabled: true
                             onClicked: mainTabBar.currentIndex = index
+                            ToolTip.text: modelData.name + "\t" + app.polishShortcutTextForDisplay("Alt+"+(index+1))
+                            ToolTip.delay: 1000
+                            ToolTip.visible: containsMouse
                         }
                     }
                 }
@@ -1252,7 +1386,7 @@ Item {
 
     Loader {
         id: contentLoader
-        active: true
+        active: !scriteDocument.loading
         sourceComponent: uiLayoutComponent
         anchors.left: parent.left
         anchors.right: parent.right
@@ -1272,6 +1406,15 @@ Item {
         ScriptAction {
             script: {
                 contentLoader.active = false
+            }
+        }
+
+        PauseAnimation {
+            duration: 100
+        }
+
+        ScriptAction {
+            script: {
                 if(resetContentAnimation.filePath === "")
                     scriteDocument.reset()
                 else
@@ -1323,12 +1466,12 @@ Item {
                 anchors.fill: parent
                 anchors.margins: 5
                 clip: true
-                readonly property bool editCurrentSceneInStructure: false
                 readonly property int screenplayZoomLevelModifier: 0
                 sourceComponent: {
                     switch(mainTabBar.currentIndex) {
                     case 1: return structureEditorComponent
                     case 2: return notebookEditorComponent
+                    case 3: return scritedComponent
                     }
                     return screenplayEditorComponent
                 }
@@ -1341,7 +1484,6 @@ Item {
 
         ScreenplayEditor {
             zoomLevelModifier: screenplayZoomLevelModifier
-            source: sourceBinder.get
             additionalCharacterMenuItems: {
                 if(mainTabBar.currentIndex === 1) {
                     if(workspaceSettings.showNotebookInStructure)
@@ -1356,6 +1498,23 @@ Item {
                 }
                 return []
             }
+            Behavior on opacity {
+                enabled: screenplayEditorSettings.enableAnimations
+                NumberAnimation { duration: 250 }
+            }
+
+            source: {
+                if(mainTabBar.currentIndex !== 0 &&
+                   scriteDocument.structure.elementCount > 0 &&
+                   scriteDocument.screenplay.currentElementIndex < 0) {
+                    var index = scriteDocument.structure.currentElementIndex
+                    var element = scriteDocument.structure.elementAt(index)
+                    if(scriteDocument.screenplay.firstIndexOfScene(element.scene) >= 0)
+                        return scriteDocument.loading ? null : scriteDocument.screenplay
+                    return element ? element.scene : scriteDocument.screenplay
+                }
+                return scriteDocument.loading ? null : scriteDocument.screenplay
+            }
 
             onAdditionalCharacterMenuItemClicked: {
                 if(menuItemName === "Character Notes" && workspaceSettings.showNotebookInStructure) {
@@ -1369,20 +1528,6 @@ Item {
             onAdditionalSceneMenuItemClicked: {
                 if(menuItemName === "Scene Notes")
                     Announcement.shout("41EE5E06-FF97-4DB6-B32D-F938418C9529", scene)
-            }
-
-            DelayedPropertyBinder {
-                id: sourceBinder
-                initial: null
-                set: {
-                    if(editCurrentSceneInStructure && scriteDocument.screenplay.currentElementIndex < 0) {
-                        var index = scriteDocument.structure.currentElementIndex
-                        var element = scriteDocument.structure.elementAt(index)
-                        return element ? element.scene : null
-                    }
-                    return scriteDocument.loading ? null : scriteDocument.screenplay
-                }
-                delay: 50
             }
         }
     }
@@ -1447,20 +1592,20 @@ Item {
                                 Loader {
                                     id: structureViewLoader
                                     anchors.fill: parent
-                                    active: !workspaceSettings.showNotebookInStructure || structureEditorTabs.currentTabIndex === 0
-                                    sourceComponent: StructureView {
-                                        onRequestEditor: screenplayEditor2.editCurrentSceneInStructure = scriteDocument.screenplay.currentElementIndex < 0
-                                        onReleaseEditor: screenplayEditor2.editCurrentSceneInStructure = false
-                                    }
+                                    visible: !workspaceSettings.showNotebookInStructure || structureEditorTabs.currentTabIndex === 0
+                                    sourceComponent: StructureView { }
                                 }
 
                                 Loader {
                                     id: notebookViewLoader
                                     anchors.fill: parent
-                                    active: workspaceSettings.showNotebookInStructure && structureEditorTabs.currentTabIndex === 1
-                                    sourceComponent: NotebookView {
-
+                                    active: false
+                                    visible: workspaceSettings.showNotebookInStructure && structureEditorTabs.currentTabIndex === 1
+                                    onVisibleChanged: {
+                                        if(visible && !active)
+                                            active = true
                                     }
+                                    sourceComponent: NotebookView { }
                                 }
                             }
                         }
@@ -1470,17 +1615,10 @@ Item {
                         id: screenplayEditor2
                         SplitView.preferredWidth: workspaceSettings.screenplayEditorWidth < 0 ? ui.width * 0.5 : workspaceSettings.screenplayEditorWidth
                         onWidthChanged: workspaceSettings.screenplayEditorWidth = width
-                        property bool editCurrentSceneInStructure: true
                         readonly property int screenplayZoomLevelModifier: -3
-                        active: screenplayEditor2Active.value && width >= 50
+                        active: width >= 50
                         sourceComponent: mainTabBar.currentIndex === 1 ? screenplayEditorComponent : null
                     }
-                }
-
-                ResetOnChange {
-                    id: screenplayEditor2Active
-                    trackChangesOn: screenplayEditor2.editCurrentSceneInStructure
-                    from: false; to: true
                 }
             }
 
@@ -1496,7 +1634,6 @@ Item {
                     ScreenplayView {
                         anchors.fill: parent
                         anchors.margins: 5
-                        onRequestEditor: screenplayEditor2.editCurrentSceneInStructure = false
                         showNotesIcon: workspaceSettings.showNotebookInStructure
                     }
                 }
@@ -1537,6 +1674,14 @@ Item {
     }
 
     Component {
+        id: scritedComponent
+
+        ScritedView {
+
+        }
+    }
+
+    Component {
         id: aboutBoxComponent
         AboutBox { }
     }
@@ -1551,13 +1696,11 @@ Item {
         nameFilters: modes[mode].nameFilters
         selectFolder: false
         selectMultiple: false
-        folder: {
-            if(scriteDocument.fileName !== "") {
-                var fileInfo = app.fileInfo(scriteDocument.fileName)
-                if(fileInfo.exists)
-                    return "file:///" + fileInfo.absolutePath
-            }
-            return "file:///" + StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+        onFolderChanged: {
+            if(mode === "OPEN")
+                workspaceSettings.lastOpenFolderUrl = folder
+            else
+                workspaceSettings.lastOpenImportFolderUrl = folder
         }
         sidebarVisible: true
         selectExisting: modes[mode].selectExisting
@@ -1613,6 +1756,7 @@ Item {
 
         function launch(launchMode, filePath) {
             mode = launchMode
+            folder = mode === "IMPORT" ? workspaceSettings.lastOpenImportFolderUrl : workspaceSettings.lastOpenFolderUrl
 
             if(filePath)
                 app.execLater(qmlWindow, 250, function() { processFile(filePath) } )
@@ -1664,105 +1808,6 @@ Item {
         id: openFromLibraryComponent
 
         OpenFromLibrary { }
-    }
-
-    Loader {
-        id: openingAnimationLoader
-        active: splashLoader.active === false
-        anchors.fill: parent
-        sourceComponent: SequentialAnimation {
-            running: true
-
-            PauseAnimation {
-                duration: screenplayEditorSettings.enableAnimations ? 500 : 0
-            }
-
-            ScriptAction {
-                script: appLogo.ToolTip.visible = true
-            }
-
-            PropertyAnimation {
-                target: appLogo
-                properties: "scale"
-                from: 1; to: 1.5
-                duration: screenplayEditorSettings.enableAnimations ? 1000 : 0
-            }
-
-            PropertyAnimation {
-                target: appLogo
-                properties: "scale"
-                from: 1.5; to: 1
-                duration: screenplayEditorSettings.enableAnimations ? 1000 : 0
-            }
-
-            PauseAnimation {
-                duration: screenplayEditorSettings.enableAnimations ? 0 : 2000
-            }
-
-            ScriptAction {
-                script: {
-                    appLogo.ToolTip.visible = false
-                    if(workspaceSettings.scriptalayIntroduced)
-                        openingAnimationLoader.active = false
-                    else {
-                        var r = openingAnimationLoader.mapFromItem(openFromLibrary, 0, 0, openFromLibrary.width, openFromLibrary.height)
-                        openFromLibraryIntro.parent.x = r.x
-                        openFromLibraryIntro.parent.y = r.y
-                        openFromLibraryIntro.parent.width = r.width
-                        openFromLibraryIntro.parent.height = r.height
-                        openFromLibraryIntro.visible = true
-                    }
-                }
-            }
-
-            PropertyAnimation {
-                target: openFromLibrary.toolButtonImage
-                properties: "scale"
-                from: 1; to: 3
-                duration: screenplayEditorSettings.enableAnimations ? 1000 : 0
-            }
-
-            PropertyAnimation {
-                target: openFromLibrary.toolButtonImage
-                properties: "scale"
-                from: 3; to: 1
-                duration: screenplayEditorSettings.enableAnimations ? 1000 : 0
-            }
-
-            PauseAnimation {
-                duration: 5000
-            }
-
-            ScriptAction {
-                script: {
-                    openFromLibraryIntro.visible = false
-                    openingAnimationLoader.active = false
-                    workspaceSettings.scriptalayIntroduced = true
-                }
-            }
-        }
-
-        Item {
-            Rectangle {
-                id: openFromLibraryIntro
-                anchors.top: parent.bottom
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: openFromLibraryIntroText.width + 40
-                height: openFromLibraryIntroText.height + 40
-                color: primaryColors.c600.background
-                visible: false
-
-                Text {
-                    id: openFromLibraryIntroText
-                    anchors.centerIn: parent
-                    width: 250
-                    text: "Introducing <strong>Scriptalay</strong>! Click this button to browse through and download from a repository of screenpalys in Scrite format."
-                    wrapMode: Text.WordWrap
-                    font.pointSize: app.idealFontPointSize
-                    color: primaryColors.c600.text
-                }
-            }
-        }
     }
 
     Item {

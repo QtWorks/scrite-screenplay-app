@@ -215,6 +215,10 @@ public:
 
     Q_INVOKABLE void saveWindowGeometry(QWindow *window, const QString &group);
     Q_INVOKABLE bool restoreWindowGeometry(QWindow *window, const QString &group);
+    Q_INVOKABLE void launchNewInstance(QWindow *window);
+    Q_INVOKABLE void toggleFullscreen(QWindow *window);
+
+    Q_INVOKABLE bool resetObjectProperty(QObject *object, const QString &propName);
 
     // Must be called from main.cpp
     void initializeStandardColors(QQmlEngine *);
@@ -239,6 +243,8 @@ public:
     Q_SIGNAL void openFileRequest(const QString &filePath);
 
     QString sanitiseFileName(const QString &fileName) const;
+
+    Q_INVOKABLE void log(const QString &message);
 
     bool event(QEvent *event);
 

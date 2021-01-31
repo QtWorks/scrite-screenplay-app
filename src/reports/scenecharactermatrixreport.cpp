@@ -118,12 +118,11 @@ bool SceneCharacterMatrixReport::doGenerate(QTextDocument *document)
     // Lets compile a list of scene names.
     auto compileSceneTitles = [screenplay]() {
         QStringList ret;
-        int sceneNumber = 0;
         for(int i=0; i<screenplay->elementCount(); i++) {
             const ScreenplayElement *element = screenplay->elementAt(i);
             const Scene *scene = element->scene();
             if(scene) {
-                QString title = QStringLiteral("[") + QString::number(++sceneNumber) + QStringLiteral("]: ")
+                QString title = QStringLiteral("[") + element->resolvedSceneNumber() + QStringLiteral("]: ")
                         + (scene->heading()->isEnabled() ? scene->heading()->text() : QStringLiteral("NO SCENE HEADING"));
                 if(title.length() > 25)
                     title = title.left(23) + "...";

@@ -14,10 +14,11 @@
 #ifndef QTEXTDOCUMENTPAGEDPRINTER_H
 #define QTEXTDOCUMENTPAGEDPRINTER_H
 
+#include <QColor>
+#include <QEvent>
 #include <QObject>
 #include <QTextDocument>
 #include <QPagedPaintDevice>
-#include <QColor>
 
 #include "errorreport.h"
 #include "progressreport.h"

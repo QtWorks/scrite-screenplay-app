@@ -20,6 +20,7 @@
 #include "garbagecollector.h"
 #include "screenplaytextdocument.h"
 
+#include <QDir>
 #include <QDate>
 #include <QtMath>
 #include <QtDebug>
@@ -36,6 +37,9 @@
 #include <QTextBlockUserData>
 #include <QScopedValueRollback>
 #include <QAbstractTextDocumentLayout>
+#include <QJsonDocument>
+#include <QPropertyAnimation>
+#include <QUrl>
 
 class ScreenplayParagraphBlockData : public QTextBlockUserData
 {
@@ -358,6 +362,67 @@ void ScreenplayTextDocument::setPrintEachSceneOnANewPage(bool val)
     this->loadScreenplayLater();
 }
 
+void ScreenplayTextDocument::setTitlePageIsCentered(bool val)
+{
+    if(m_titlePageIsCentered == val)
+        return;
+
+    m_titlePageIsCentered = val;
+    emit titlePageIsCenteredChanged();
+
+    this->loadScreenplayLater();
+}
+
+void ScreenplayTextDocument::setSecondsPerPage(int val)
+{
+    val = qBound(15, val, 300);
+    const int secs = val % 60;
+    const int mins = (val - secs)/60;
+    this->setTimePerPage( QTime(0,mins,secs) );
+}
+
+int ScreenplayTextDocument::secondsPerPage() const
+{
+    return m_timePerPage.minute()*60 + m_timePerPage.second();
+}
+
+void ScreenplayTextDocument::setTimePerPage(const QTime &val)
+{
+    if(m_timePerPage == val)
+        return;
+
+    m_timePerPage = val;
+    emit timePerPageChanged();
+
+    this->evaluatePageBoundariesLater();
+}
+
+inline QString timeToString(const QTime &t)
+{
+    if(t == QTime(0,0,0))
+        return QStringLiteral("00:00 min");
+
+    if(t.hour() > 0)
+        return t.toString(QStringLiteral("H:mm:ss")) + QStringLiteral(" hrs");
+
+    return t.toString(QStringLiteral("m:ss")) + QStringLiteral(" min");
+}
+
+QString ScreenplayTextDocument::timePerPageAsString() const
+{
+    return timeToString(m_timePerPage);
+}
+
+QString ScreenplayTextDocument::totalTimeAsString() const
+{
+    return timeToString(m_totalTime);
+}
+
+QString ScreenplayTextDocument::currentTimeAsString() const
+{
+    return timeToString(m_currentTime);
+}
+
 void ScreenplayTextDocument::print(QObject *printerObject)
 {
     HourGlass hourGlass;
@@ -494,6 +559,7 @@ void ScreenplayTextDocument::setInjection(QObject *val)
 
 void ScreenplayTextDocument::syncNow()
 {
+    m_loadScreenplayTimer.stop();
     this->loadScreenplay();
 }
 
@@ -554,23 +620,60 @@ void ScreenplayTextDocument::setUpdating(bool val)
     }
 }
 
-void ScreenplayTextDocument::setPageCount(int val)
+inline QTime secondsToTime(int seconds)
 {
-    if(m_pageCount == val)
-        return;
-
-    m_pageCount = val;
-    emit pageCountChanged();
+    if(seconds == 0)
+        return QTime(0,0,0);
+    const int s = seconds > 60 ? seconds % 60 : seconds;
+    const int tm = seconds > 60 ? (seconds-s)/60 : 0;
+    const int m = tm > 60 ? tm%60 : tm;
+    const int h = seconds > 3600 ? (seconds - m*60 - s)/(60*60) : 0;
+    return QTime(h, m, s);
 }
 
-void ScreenplayTextDocument::setCurrentPage(int val)
+void ScreenplayTextDocument::setPageCount(qreal val)
 {
-    val = m_pageCount > 0 ? qBound(1, val, m_pageCount) : 0;
-    if(m_currentPage == val)
-        return;
+    if(qCeil(val) != m_pageCount)
+    {
+        m_pageCount = qCeil(val);
+        emit pageCountChanged();
+    }
 
-    m_currentPage = val;
-    emit currentPageChanged();
+    const int secsPerPage = m_timePerPage.hour()*60*60 + m_timePerPage.minute()*60 + m_timePerPage.second();
+    const int totalSecs = int( qCeil(val * secsPerPage) );
+    const QTime totalT = ::secondsToTime(totalSecs);
+    if(m_totalTime != totalT)
+    {
+        m_totalTime = totalT;
+        emit currentTimeChanged();
+    }
+}
+
+void ScreenplayTextDocument::setCurrentPageAndPosition(int page, qreal pos)
+{
+    page = m_pageCount > 0 ? qBound(1, page, qCeil(m_pageCount)) : 0;
+    if(m_currentPage != page)
+    {
+        m_currentPage = page;
+        emit currentPageChanged();
+    }
+
+    pos = m_pageCount > 0 ? qBound(0.0, pos, 1.0) : 0;
+    if( !qFuzzyCompare(pos, m_currentPosition) )
+    {
+        m_currentPosition = pos;
+        emit currentPositionChanged();
+    }
+
+    const int totalSecs = m_totalTime.hour()*60*60 + m_totalTime.minute()*60 + m_totalTime.second();
+    const int currentSecs = int(m_currentPosition * qreal(totalSecs));
+
+    const QTime currentT = ::secondsToTime(currentSecs);
+    if(m_currentTime != currentT)
+    {
+        m_currentTime = currentT;
+        emit currentTimeChanged();
+    }
 }
 
 inline void polishFontsAndInsertTextAtCursor(QTextCursor &cursor, const QString &text)
@@ -606,6 +709,7 @@ void ScreenplayTextDocument::loadScreenplay()
     this->clearTextFrames();
     m_sceneResetList.clear();
     m_textDocument->clear();
+    m_textDocument->setProperty("#characterImageResourceUrls", QVariant());
     m_sceneResetTimer.stop();
     m_pageBoundaryEvalTimer.stop();
 
@@ -632,7 +736,7 @@ void ScreenplayTextDocument::loadScreenplay()
         }
     }
 
-    const QTextFrameFormat rootFrameFormat = m_textDocument->rootFrame()->frameFormat();
+    // const QTextFrameFormat rootFrameFormat = m_textDocument->rootFrame()->frameFormat();
 
     // So that QTextDocumentPrinter can pick up this for header and footer fields.
     m_textDocument->setProperty("#title", m_screenplay->title());
@@ -666,6 +770,7 @@ void ScreenplayTextDocument::loadScreenplay()
         QTextCharFormat titlePageFormat;
         titlePageFormat.setObjectType(ScreenplayTitlePageObjectInterface::Kind);
         titlePageFormat.setProperty(ScreenplayTitlePageObjectInterface::ScreenplayProperty, QVariant::fromValue<QObject*>(m_screenplay));
+        titlePageFormat.setProperty(ScreenplayTitlePageObjectInterface::TitlePageIsCentered, m_titlePageIsCentered);
         cursor.insertText(QString(QChar::ObjectReplacementCharacter), titlePageFormat);
     }
 
@@ -720,7 +825,7 @@ void ScreenplayTextDocument::loadScreenplay()
 
 void ScreenplayTextDocument::includeMoreAndContdMarkers()
 {
-    if(m_purpose != ForPrinting || m_syncEnabled)
+    if(m_purpose != ForPrinting/* || m_syncEnabled*/)
         return;
 
     /**
@@ -816,9 +921,6 @@ void ScreenplayTextDocument::includeMoreAndContdMarkers()
 
     while(pageIndex < nrPages)
     {
-        if(pageIndex == 38)
-            qDebug("Check this.");
-
         paperRect = QRectF(0, pageIndex*paperRect.height(), paperRect.width(), paperRect.height());
         const QRectF contentsRect = paperRect.adjusted(pageMargins.left(), pageMargins.top(), -pageMargins.right(), -pageMargins.bottom());
         const int lastPosition = pageIndex == nrPages-1 ? endCursor.position() : layout->hitTest(contentsRect.bottomRight(), Qt::FuzzyHit);
@@ -1135,7 +1237,7 @@ void ScreenplayTextDocument::onSceneInserted(ScreenplayElement *element, int ind
         while(before == nullptr)
         {
             before = m_screenplay->elementAt(--index);
-            if(before->scene() == nullptr)
+            if(before == nullptr || before->scene() == nullptr)
             {
                 before = nullptr;
                 continue;
@@ -1365,7 +1467,7 @@ void ScreenplayTextDocument::onActiveSceneChanged()
         }
     }
 
-    this->evaluateCurrentPage();
+    this->evaluateCurrentPageAndPosition();
 }
 
 void ScreenplayTextDocument::onActiveSceneDestroyed(Scene *ptr)
@@ -1376,16 +1478,20 @@ void ScreenplayTextDocument::onActiveSceneDestroyed(Scene *ptr)
 
 void ScreenplayTextDocument::onActiveSceneCursorPositionChanged()
 {
-    this->evaluateCurrentPage();
+    this->evaluateCurrentPageAndPosition();
 }
 
-void ScreenplayTextDocument::evaluateCurrentPage()
+void ScreenplayTextDocument::evaluateCurrentPageAndPosition()
 {
-    if(m_screenplay == nullptr || m_screenplay->currentElementIndex() < 0 ||
-       m_activeScene == nullptr || m_textDocument == nullptr || m_textDocument->isEmpty() ||
-       m_formatting == nullptr)
+    if(m_screenplay == nullptr || m_activeScene == nullptr || m_textDocument == nullptr || m_formatting == nullptr)
     {
-        this->setCurrentPage(0);
+        this->setCurrentPageAndPosition(0, 0);
+        return;
+    }
+
+    if(m_screenplay->currentElementIndex() < 0 || m_textDocument->isEmpty())
+    {
+        this->setCurrentPageAndPosition(0, 0);
         return;
     }
 
@@ -1393,7 +1499,7 @@ void ScreenplayTextDocument::evaluateCurrentPage()
     QTextFrame *frame = element && element->scene() && element->scene() == m_activeScene ? this->findTextFrame(element) : nullptr;
     if(frame == nullptr)
     {
-        this->setCurrentPage(0);
+        this->setCurrentPageAndPosition(0, 0);
         return;
     }
 
@@ -1402,9 +1508,13 @@ void ScreenplayTextDocument::evaluateCurrentPage()
 
     if(endCursor.position() == 0)
     {
-        this->setCurrentPage(0);
+        this->setCurrentPageAndPosition(0, 0);
         return;
     }
+
+    const int documentLength = endCursor.position();
+    if(documentLength > 0 && m_pageBoundaries.isEmpty())
+        this->evaluatePageBoundaries();
 
     QTextCursor userCursor = frame->firstCursorPosition();
     QTextBlock block = userCursor.block();
@@ -1418,14 +1528,14 @@ void ScreenplayTextDocument::evaluateCurrentPage()
         const QPair<int,int> pgBoundary = m_pageBoundaries.at(i);
         if(cursorPosition >= pgBoundary.first-1 && cursorPosition < pgBoundary.second)
         {
-            this->setCurrentPage(i+1);
+            this->setCurrentPageAndPosition(i+1, qreal(cursorPosition)/qreal(documentLength));
             return;
         }
     }
 
     // If we are here, then the cursor position was not found anywhere in the pageBoundaries.
     // So, we estimate the current page to be the last page.
-    this->setCurrentPage(m_pageCount);
+    this->setCurrentPageAndPosition(m_pageCount, 1.0);
 }
 
 void ScreenplayTextDocument::evaluatePageBoundaries()
@@ -1434,12 +1544,10 @@ void ScreenplayTextDocument::evaluatePageBoundaries()
     // timerEvent(), while handling m_pageBoundaryEvalTimer
     QList< QPair<int,int> > pgBoundaries;
 
-    if(m_formatting != nullptr && m_textDocument != nullptr)
+    if(m_formatting != nullptr && m_textDocument != nullptr && m_screenplay != nullptr)
     {
         m_textDocument->setDefaultFont(m_formatting->defaultFont());
         m_formatting->pageLayout()->configure(m_textDocument);
-
-        this->setPageCount(m_textDocument->pageCount());
 
         const ScreenplayPageLayout *pageLayout = m_formatting->pageLayout();
         const QMarginsF pageMargins = pageLayout->margins();
@@ -1449,6 +1557,8 @@ void ScreenplayTextDocument::evaluatePageBoundaries()
 
         QTextCursor endCursor(m_textDocument);
         endCursor.movePosition(QTextCursor::End);
+
+        qreal fpageCount = 0.1;
 
         const int pageCount = m_textDocument->pageCount();
         int pageIndex = 0;
@@ -1461,13 +1571,34 @@ void ScreenplayTextDocument::evaluatePageBoundaries()
             pgBoundaries << qMakePair(firstPosition, lastPosition >= 0 ? lastPosition : endCursor.position());
 
             ++pageIndex;
+
+            if(pageIndex == pageCount)
+            {
+                ScreenplayElement *lastElement = m_screenplay->elementAt(m_screenplay->elementCount()-1);
+                if(lastElement == nullptr)
+                    fpageCount = 0.01;
+                else
+                {
+                    QTextFrame *lastFrame = this->findTextFrame(lastElement);
+                    if(lastFrame == nullptr)
+                        fpageCount = m_textDocument->pageCount();
+                    else
+                    {
+                        const QRectF lastFrameRect = m_textDocument->documentLayout()->frameBoundingRect(lastFrame);
+                        fpageCount = m_textDocument->pageCount()-1;
+                        fpageCount += (lastFrameRect.bottom() - contentsRect.top())/contentsRect.height();
+                    }
+                }
+            }
         }
+
+        this->setPageCount(fpageCount);
     }
 
     m_pageBoundaries = pgBoundaries;
     emit pageBoundariesChanged();
 
-    this->evaluateCurrentPage();
+    this->evaluateCurrentPageAndPosition();
 }
 
 void ScreenplayTextDocument::evaluatePageBoundariesLater()
@@ -1539,7 +1670,8 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
                 sceneNumberFormat.setObjectType(ScreenplayTextObjectInterface::Kind);
                 sceneNumberFormat.setFont(m_formatting->elementFormat(SceneElement::Heading)->font());
                 sceneNumberFormat.setProperty(ScreenplayTextObjectInterface::TypeProperty, ScreenplayTextObjectInterface::SceneNumberType);
-                sceneNumberFormat.setProperty(ScreenplayTextObjectInterface::DataProperty, element->sceneNumber());
+                const QVariantList data = QVariantList() << element->resolvedSceneNumber() << scene->heading()->text() << m_screenplay->indexOfElement(const_cast<ScreenplayElement*>(element));
+                sceneNumberFormat.setProperty(ScreenplayTextObjectInterface::DataProperty, data);
                 cursor.insertText(QString(QChar::ObjectReplacementCharacter), sceneNumberFormat);
             }
 
@@ -1567,9 +1699,75 @@ void ScreenplayTextDocument::loadScreenplayElement(const ScreenplayElement *elem
                 if(insertBlock)
                     cursor.insertBlock();
 
-                prepareCursor(cursor, SceneElement::Heading, !insertBlock);
-                cursor.mergeCharFormat(highlightCharFormat);
-                cursor.insertText( QStringLiteral("{") + sceneCharacters.join(", ") + QStringLiteral("}") );
+                prepareCursor(cursor, SceneElement::Action, !insertBlock);
+
+                if(m_purpose == ForDisplay)
+                {
+                    cursor.insertHtml( QStringLiteral("<strong>Characters: </strong>") );
+                    cursor.insertHtml( sceneCharacters.join(QStringLiteral(", ") ) );
+                }
+                else
+                {
+                    QFont font = m_textDocument->defaultFont();
+                    font.setPointSize(font.pointSize()-2);
+
+                    const QFontMetrics fontMetrics(font);
+                    const qreal ipr = 2.0; // Image Pixel Ratio
+                    const int padding = 6;
+
+                    QVariantMap characterImageResourceUrls = m_textDocument->property("#characterImageResourceUrls").toMap();
+
+                    auto insertTextAsImage = [&](const QString &name, const QString &text, bool withBackground) {
+                        QUrl url;
+
+                        if(characterImageResourceUrls.contains(name)) {
+                            url = characterImageResourceUrls.value(name).toUrl();
+                        } else {
+                            url = QStringLiteral("scrite://character_") + QString::number(characterImageResourceUrls.size()) + QStringLiteral(".png");
+
+                            QRect textRect = fontMetrics.boundingRect(text);
+                            textRect.moveTopLeft( QPoint(0,0) );
+                            textRect.setWidth( textRect.width() + 2*fontMetrics.averageCharWidth() );
+                            textRect.adjust(padding, padding, padding, padding);
+
+                            const QSize imageSize = (textRect.size() + QSize(padding,padding)*2)*ipr;
+
+                            QImage image(imageSize, QImage::Format_ARGB32);
+                            image.setDevicePixelRatio(ipr);
+                            image.fill(Qt::transparent);
+
+                            const QRect bgRect = textRect.adjusted(-padding/2, -padding/2, padding/2, padding/2);
+
+                            QPainter paint(&image);
+                            paint.setRenderHint(QPainter::Antialiasing);
+                            paint.setRenderHint(QPainter::TextAntialiasing);
+                            paint.setFont(font);
+                            paint.setPen( QPen(Qt::black,0.5) );
+                            if(withBackground) {
+                                paint.setBrush(QColor(245,245,245));
+                                paint.drawRoundedRect(bgRect, bgRect.height()/2, bgRect.height()/2);
+                            }
+                            paint.drawText(textRect, Qt::AlignCenter, text);
+                            paint.end();
+
+                            characterImageResourceUrls.insert(name, url);
+                            m_textDocument->addResource(QTextDocument::ImageResource, url, QVariant::fromValue<QImage>(image));
+                        }
+
+                        QTextImageFormat imageFormat;
+                        imageFormat.setName(url.toString());
+                        cursor.insertImage(imageFormat);
+
+                        return url;
+                    };
+
+                    insertTextAsImage(QString(), QStringLiteral("Characters:"), false);
+                    for(const QString &sceneCharacter : sceneCharacters)
+                        insertTextAsImage(sceneCharacter, sceneCharacter, true);
+
+                    m_textDocument->setProperty("#characterImageResourceUrls", characterImageResourceUrls);
+                }
+
                 insertBlock = true;
             }
         }
@@ -1874,7 +2072,7 @@ QSizeF ScreenplayTitlePageObjectInterface::intrinsicSize(QTextDocument *doc, int
     return ret;
 }
 
-void ScreenplayTitlePageObjectInterface::drawObject(QPainter *painter, const QRectF &rect, QTextDocument *doc, int posInDocument, const QTextFormat &format)
+void ScreenplayTitlePageObjectInterface::drawObject(QPainter *painter, const QRectF &givenRect, QTextDocument *doc, int posInDocument, const QTextFormat &format)
 {
     Q_UNUSED(posInDocument)
 
@@ -1900,6 +2098,14 @@ void ScreenplayTitlePageObjectInterface::drawObject(QPainter *painter, const QRe
       Written or Generated using Scrite
       https://www.scrite.io
       */
+    auto evaluateCenteredPaintRect = [=]() {
+        const QTextFrameFormat rootFrameFormat = doc->rootFrame()->frameFormat();
+        const qreal margin = (rootFrameFormat.rightMargin() + rootFrameFormat.leftMargin())/2;
+        QRectF ret = givenRect;
+        ret.moveLeft(margin);
+        return ret;
+    };
+    const QRectF rect = format.property(TitlePageIsCentered).toBool() ? evaluateCenteredPaintRect() : givenRect;
 
     const Screenplay *screenplay = qobject_cast<Screenplay*>(format.property(ScreenplayProperty).value<QObject*>());
     if(screenplay == nullptr)
@@ -2093,14 +2299,17 @@ void ScreenplayTextObjectInterface::drawSceneNumber(QPainter *painter, const QRe
     Q_UNUSED(doc)
     Q_UNUSED(posInDocument)
 
-    const int sceneNumber = format.property(DataProperty).toInt();
-    if(sceneNumber < 0)
+    const QVariantList data = format.property(DataProperty).toList();
+    const QString sceneNumber = data.at(0).toString();
+    if(sceneNumber.isEmpty())
         return;
 
-    QRectF rect = givenRect;
-    rect.setLeft( rect.left()*0.6 );
+    const QString sceneHeading = data.at(1).toString();
 
-    const QString sceneNumberText = QString::number(sceneNumber) + QStringLiteral(".");
+    QRectF rect = givenRect;
+    rect.setLeft(rect.left()*0.55);
+
+    const QString sceneNumberText = sceneNumber + QStringLiteral(".");
     this->drawText(painter, rect, sceneNumberText);
 }
 

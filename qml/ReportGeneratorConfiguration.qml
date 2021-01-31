@@ -195,6 +195,8 @@ Item {
                                         }
                                         onSelectedExtensionChanged: generator.format = selectedExtension.value
                                         onAbsoluteFilePathChanged: generator.fileName = absoluteFilePath
+                                        folder: workspaceSettings.lastOpenReportsFolderUrl
+                                        onFolderChanged: workspaceSettings.lastOpenReportsFolderUrl = folder
                                     }
 
                                     Repeater {
@@ -622,7 +624,7 @@ Item {
                             text: {
                                 var scene = screenplayElement.scene
                                 if(scene && scene.heading.enabled)
-                                    return "[" + screenplayElement.sceneNumber + "] " + (scene && scene.heading.enabled ? scene.heading.text : "")
+                                    return "[" + screenplayElement.resolvedSceneNumber + "] " + (scene && scene.heading.enabled ? scene.heading.text : "")
                                 return "NO SCENE HEADING"
                             }
                             checked: sceneListView.selectedSceneNumbers.indexOf(screenplayElement.sceneNumber) >= 0
